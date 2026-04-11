@@ -222,6 +222,18 @@ export const api = {
   // LLM
   llmStatus: () => request<{ configured: boolean; model: string }>('/llm/status'),
 
+  // Dashboard summary (streak/训练/错题 等)
+  dashboardSummary: () =>
+    request<{
+      streak_days: number
+      month_checkins: number
+      month_distinct_days: number
+      practice: { total: number; graded: number; correct: number }
+      mistakes: { total: number; mastered: number }
+      calendar_14d: { date: string; done: number }[]
+      today: string
+    }>('/dashboard/summary'),
+
   // Uploads (试卷照片)
   listUploads: () => request<ExamUpload[]>('/uploads'),
   getUpload: (id: number) => request<ExamUpload>(`/uploads/${id}`),
@@ -248,6 +260,26 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ indices }),
     }),
+
+  // Monthly reports (月度复盘)
+  listMonthlyReports: () =>
+    request<{ id: number; month: string; created_at: string }[]>('/reports/monthly'),
+  getMonthlyReport: (month: string) =>
+    request<{
+      exists: boolean
+      month: string
+      id?: number
+      content_md?: string
+      metrics?: any
+      created_at?: string
+    }>(`/reports/monthly/${month}`),
+  generateMonthlyReport: (month: string, force: boolean = false) =>
+    request<{ id: number; month: string; content_md: string; metrics: any }>(
+      `/reports/monthly/${month}/generate`,
+      { method: 'POST', body: JSON.stringify({ force }) }
+    ),
+  deleteMonthlyReport: (month: string) =>
+    request<{ ok: boolean }>(`/reports/monthly/${month}`, { method: 'DELETE' }),
 
   // Practice (二次训练)
   listPracticeSets: () => request<PracticeSet[]>('/practice'),

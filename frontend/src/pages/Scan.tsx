@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, ExamUpload, ExtractedMistake } from '../api'
+import { compressImage, stitchImagesVertical, formatBytes } from '../utils/compressImage'
 
 export default function Scan() {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -29,11 +30,25 @@ export default function Scan() {
     reload()
   }, [])
 
-  async function upload(file: File) {
-    setBusy('上传中...')
+  async function upload(files: File[]) {
+    if (files.length === 0) return
     setErr('')
     try {
-      const u = await api.uploadExamImage(file, examName || undefined)
+      const multiple = files.length > 1
+      if (multiple) {
+        setBusy(`拼接 ${files.length} 张图中...`)
+      } else {
+        setBusy(`压缩图片中... (${formatBytes(files[0].size)})`)
+      }
+      const result = multiple
+        ? await stitchImagesVertical(files)
+        : await compressImage(files[0])
+      const ratio = (result.compressedSize / result.originalSize) * 100
+      setBusy(
+        (multiple ? `上传拼接图 (${files.length} 页)... ` : '上传中... ') +
+          `${formatBytes(result.originalSize)} → ${formatBytes(result.compressedSize)} (${ratio.toFixed(0)}%)`
+      )
+      const u = await api.uploadExamImage(result.file, examName || undefined)
       setExamName('')
       setActive(u)
       setSelected(new Set())
@@ -118,6 +133,9 @@ export default function Scan() {
 
       {/* 上传区 */}
       <div className="bg-white border border-slate-200 rounded-lg p-5 space-y-3">
+        <div className="text-xs text-slate-500">
+          💡 一次可选多张试卷页, 系统会自动拼接成一张后再识别
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <input
             className="md:col-span-2 border border-slate-300 rounded px-3 py-2 text-sm"
@@ -129,11 +147,11 @@ export default function Scan() {
             ref={fileRef}
             type="file"
             accept="image/*"
-            capture="environment"
+            multiple
             className="hidden"
             onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) upload(f)
+              const files = Array.from(e.target.files || [])
+              if (files.length > 0) upload(files)
               e.target.value = ''
             }}
           />
@@ -142,7 +160,7 @@ export default function Scan() {
             disabled={!!busy}
             className="px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
           >
-            📸 拍照 / 选图上传
+            📸 拍照 / 选图 (支持多张)
           </button>
         </div>
         {busy && <div className="text-sm text-brand-700">{busy}</div>}

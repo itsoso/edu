@@ -252,6 +252,55 @@ GENERATE_PRACTICE_PROMPT = """基于下面这道错题, 出 {count} 道类似难
 - 直接返回 JSON, 不要任何解释文字或 markdown 代码块
 """
 
+MONTHLY_REPORT_PROMPT = """你是一位资深的初中老师, 正在为学生写月度学习复盘报告。
+
+这是 {student_name} 在 {month} 的学习数据:
+
+【考试情况】
+{exams_summary}
+
+【错题情况】
+- 本月新增错题: {new_mistakes_count} 道
+- 失分归因分布: {reason_distribution}
+- 涉及科目分布: {subject_distribution}
+- 典型错题节选:
+{top_mistakes_excerpt}
+
+【打卡情况】
+- 应打卡天数: {plan_days}
+- 实际打卡任务数: {checkin_count}
+- 打卡完成率估算: {completion_rate}
+- 训练题集: {practice_set_count} 份, 共 {practice_item_count} 题, 正确率 {practice_correct_rate}
+
+请写一份 **Markdown 格式** 的月度复盘报告, 结构如下:
+
+# {month} 月度复盘 — {student_name}
+
+## 一、本月亮点
+(2-4 条, 具体到数据或事件)
+
+## 二、需要关注的问题
+(2-4 条, 指向具体的失分归因、薄弱知识点、或执行力问题)
+
+## 三、数据背后的学习状态解读
+(1 段, 150-300 字, 把冷冰冰的数据翻译成"这孩子当下在想什么/遇到什么")
+
+## 四、下个月的三个行动
+1. **xxx** — 具体做什么, 为什么
+2. **xxx**
+3. **xxx**
+
+## 五、给家长的一句话
+(1 句, 告诉家长怎么帮她, 或者怎么不越界)
+
+---
+要求:
+- 语气温暖但不浮夸, 说人话
+- 关键结论附上数据 (如 "数学错题占 48%")
+- 行动要可执行, 不要空话
+- 直接输出 Markdown, 不要代码块包裹, 不要加任何前后缀
+"""
+
 GRADE_PRACTICE_PROMPT = """请判断学生的作答是否正确, 并给出简明点评。
 
 题目: {question_text}

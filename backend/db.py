@@ -117,6 +117,18 @@ CREATE TABLE IF NOT EXISTS practice_sets (
     FOREIGN KEY (source_mistake_id) REFERENCES mistakes(id)  ON DELETE SET NULL
 );
 
+-- 月度复盘报告 (LLM 生成, 按 month 缓存)
+CREATE TABLE IF NOT EXISTS monthly_reports (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id INTEGER NOT NULL,
+    month         TEXT    NOT NULL,                 -- YYYY-MM
+    content_md    TEXT    NOT NULL,                 -- Markdown 报告正文
+    metrics_json  TEXT,                             -- 原始指标, 便于前端二次渲染
+    created_at    TEXT    DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(owner_user_id, month),
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- 训练题条目
 CREATE TABLE IF NOT EXISTS practice_items (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,6 +156,7 @@ CREATE INDEX IF NOT EXISTS idx_users_code         ON users(join_code);
 CREATE INDEX IF NOT EXISTS idx_uploads_owner      ON exam_uploads(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_practice_sets_own  ON practice_sets(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_practice_items_set ON practice_items(set_id);
+CREATE INDEX IF NOT EXISTS idx_monthly_reports_ow ON monthly_reports(owner_user_id, month DESC);
 """
 
 

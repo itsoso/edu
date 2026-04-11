@@ -15,11 +15,21 @@ function dowFromDate(d: Date) {
   return js === 0 ? 7 : js
 }
 
+type Summary = {
+  streak_days: number
+  month_checkins: number
+  month_distinct_days: number
+  practice: { total: number; graded: number; correct: number }
+  mistakes: { total: number; mastered: number }
+  calendar_14d: { date: string; done: number }[]
+}
+
 export default function Dashboard() {
   const { user, boundStudent } = useAuth()
   const [exams, setExams] = useState<Exam[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [checkins, setCheckins] = useState<Checkin[]>([])
+  const [summary, setSummary] = useState<Summary | null>(null)
   const [week, setWeek] = useState(1)
 
   const today = todayStr()
@@ -29,12 +39,20 @@ export default function Dashboard() {
 
   useEffect(() => {
     api.listExams().then(setExams)
+    api.dashboardSummary().then(setSummary).catch(() => {})
   }, [])
 
   useEffect(() => {
     api.listTasks(week, dow).then(setTasks)
     api.listCheckins(today).then(setCheckins)
   }, [week, dow, today])
+
+  async function refreshSummary() {
+    try {
+      const s = await api.dashboardSummary()
+      setSummary(s)
+    } catch {}
+  }
 
   const latest = exams[exams.length - 1]
   const prev = exams[exams.length - 2]
@@ -56,6 +74,7 @@ export default function Dashboard() {
     })
     const updated = await api.listCheckins(today)
     setCheckins(updated)
+    refreshSummary()
   }
 
   const doneCount = tasks.filter((t) => checkins.some((c) => c.task_id === t.id)).length
@@ -113,6 +132,45 @@ export default function Dashboard() {
         <StatCard label="历史最佳" value={bestRank ?? '-'} suffix="名" />
         <StatCard label="累计考试" value={exams.length} suffix="次" />
       </div>
+
+      {/* 学习状态卡片 */}
+      {summary && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatCard
+              label="连续打卡"
+              value={summary.streak_days}
+              suffix="天"
+              highlight={summary.streak_days >= 3}
+            />
+            <StatCard
+              label="本月打卡"
+              value={summary.month_distinct_days}
+              suffix="天"
+            />
+            <StatCard
+              label="训练正确率"
+              value={
+                summary.practice.graded > 0
+                  ? `${Math.round((summary.practice.correct / summary.practice.graded) * 100)}%`
+                  : '-'
+              }
+              caption={`${summary.practice.graded}/${summary.practice.total}`}
+            />
+            <StatCard
+              label="错题掌握"
+              value={
+                summary.mistakes.total > 0
+                  ? `${summary.mistakes.mastered}/${summary.mistakes.total}`
+                  : '-'
+              }
+            />
+          </div>
+
+          {/* 近 14 天打卡热力 */}
+          <CalendarStrip days={summary.calendar_14d} today={today} />
+        </>
+      )}
 
       {/* 今日进度 */}
       <div className="bg-white rounded-lg border border-slate-200 p-5">
@@ -210,6 +268,8 @@ function StatCard({
   trendUnit = '分',
   suffix,
   reverseTrendColor,
+  highlight,
+  caption,
 }: {
   label: string
   value: string | number
@@ -217,22 +277,74 @@ function StatCard({
   trendUnit?: string
   suffix?: string
   reverseTrendColor?: boolean
+  highlight?: boolean
+  caption?: string
 }) {
   const hasTrend = trend !== undefined && !isNaN(trend as number)
   const positive = (trend ?? 0) > 0
   const goodColor = reverseTrendColor ? (positive ? 'text-green-600' : 'text-red-500') : positive ? 'text-green-600' : 'text-red-500'
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-4">
+    <div
+      className={`rounded-lg border p-4 ${
+        highlight
+          ? 'bg-gradient-to-br from-amber-50 to-orange-50 border-amber-300'
+          : 'bg-white border-slate-200'
+      }`}
+    >
       <div className="text-xs text-slate-500">{label}</div>
       <div className="text-2xl font-bold mt-1">
         {value}
         {suffix && <span className="text-sm text-slate-400 ml-1">{suffix}</span>}
+        {highlight && <span className="ml-1">🔥</span>}
       </div>
+      {caption && <div className="text-xs text-slate-400 mt-0.5">{caption}</div>}
       {hasTrend && trend !== 0 && (
         <div className={`text-xs mt-0.5 ${goodColor}`}>
           {positive ? '↑' : '↓'} {Math.abs(trend as number).toFixed(1)} {trendUnit}
         </div>
       )}
+    </div>
+  )
+}
+
+function CalendarStrip({
+  days,
+  today,
+}: {
+  days: { date: string; done: number }[]
+  today: string
+}) {
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 p-4">
+      <div className="text-xs text-slate-500 mb-2">近 14 天打卡</div>
+      <div className="flex gap-1 items-end">
+        {days.map((d) => {
+          const level = d.done === 0 ? 0 : d.done <= 2 ? 1 : d.done <= 4 ? 2 : 3
+          const bg = [
+            'bg-slate-100',
+            'bg-green-200',
+            'bg-green-400',
+            'bg-green-600',
+          ][level]
+          const isToday = d.date === today
+          const dayNum = d.date.slice(8)
+          return (
+            <div
+              key={d.date}
+              className="flex-1 flex flex-col items-center gap-1"
+              title={`${d.date}: ${d.done} 项`}
+            >
+              <div
+                className={`w-full rounded ${bg} ${
+                  isToday ? 'ring-2 ring-brand-500' : ''
+                }`}
+                style={{ height: `${12 + level * 6}px` }}
+              />
+              <div className="text-[10px] text-slate-400">{dayNum}</div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
