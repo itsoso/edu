@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, Mistake } from '../api'
 import { useToast } from '../components/Toast'
 import EmptyState from '../components/EmptyState'
+import ReflectionField from '../components/ReflectionField'
 
 const SUBJECTS = ['数学', '科学', '英语', '语文', '社会']
 const REASONS = ['计算错', '审题漏', '不会做', '步骤乱', '知识遗忘', '其他']
@@ -333,6 +334,13 @@ export default function ErrorBook() {
                       )}
                     </div>
                   )}
+                  {/* 她说 — 永远不喂给 AI */}
+                  <ReflectionField
+                    kind="mistake_note"
+                    relatedId={m.id}
+                    label="我的想法"
+                    placeholder="你当时为什么会错? 以后怎么避免? 写给自己看."
+                  />
                 </div>
                 <div className="flex flex-col gap-1">
                   <button

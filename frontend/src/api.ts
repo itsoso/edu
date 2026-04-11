@@ -145,6 +145,19 @@ export type PracticeSet = {
   items: PracticeItem[]
 }
 
+export type ReflectionKind = 'mistake_note' | 'weekly_note' | 'free_write' | 'exam_feeling'
+
+export type Reflection = {
+  id: number
+  owner_user_id: number
+  kind: ReflectionKind
+  related_id: number | null
+  related_key: string | null
+  content: string
+  created_at: string
+  updated_at: string
+}
+
 export type Mistake = {
   id: number
   subject: string
@@ -244,6 +257,39 @@ export const api = {
     request<{ ok: boolean }>(`/mistakes/${id}`, { method: 'DELETE' }),
   mistakeStats: () =>
     request<{ by_reason: any[]; by_subject: any[] }>('/mistakes/stats'),
+
+  // Reflections (她的声音 — 永远不喂给 AI)
+  listReflections: (params: {
+    kind?: ReflectionKind
+    related_id?: number
+    related_key?: string
+    limit?: number
+    offset?: number
+  } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.kind) qs.set('kind', params.kind)
+    if (params.related_id !== undefined) qs.set('related_id', String(params.related_id))
+    if (params.related_key) qs.set('related_key', params.related_key)
+    if (params.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params.offset !== undefined) qs.set('offset', String(params.offset))
+    return request<Reflection[]>(`/reflections${qs.toString() ? '?' + qs : ''}`)
+  },
+  upsertReflection: (data: {
+    kind: ReflectionKind
+    related_id?: number | null
+    related_key?: string | null
+    content: string
+  }) =>
+    request<Reflection>('/reflections', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteReflection: (id: number) =>
+    request<{ ok: boolean }>(`/reflections/${id}`, { method: 'DELETE' }),
+  reflectionsStats: () =>
+    request<{ kind: ReflectionKind; count: number; total_chars: number }[]>(
+      '/reflections/stats'
+    ),
 
   // Content
   getContent: (name: string) =>

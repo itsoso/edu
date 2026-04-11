@@ -119,6 +119,23 @@ CREATE TABLE IF NOT EXISTS practice_sets (
     FOREIGN KEY (source_mistake_id) REFERENCES mistakes(id)  ON DELETE SET NULL
 );
 
+-- 反思 / 主观表达 (她的声音). **这张表永远不喂给 LLM**.
+-- kind ∈ { mistake_note | weekly_note | free_write | exam_feeling }
+-- 设计理由: 学习不只是数据, 还有她对学习的感受和思考.
+-- 一旦 AI 开始分析, 她会为了被 AI 理解而写, 不是为了她自己.
+-- 严格禁止在任何 LLM prompt / llm_audit / background task 里读取这张表.
+CREATE TABLE IF NOT EXISTS reflections (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL,
+    kind            TEXT    NOT NULL,
+    related_id      INTEGER,                    -- mistake.id / exam.id, null 时用 related_key
+    related_key     TEXT,                        -- 例: "2026-04-06" (周一日期) for weekly_note
+    content         TEXT    NOT NULL,
+    created_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- 每日一句话建议 (按 owner + date 缓存, 每天只调一次 LLM)
 CREATE TABLE IF NOT EXISTS daily_tips (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -189,7 +206,10 @@ CREATE INDEX IF NOT EXISTS idx_uploads_owner      ON exam_uploads(owner_user_id,
 CREATE INDEX IF NOT EXISTS idx_practice_sets_own  ON practice_sets(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_practice_items_set ON practice_items(set_id);
 CREATE INDEX IF NOT EXISTS idx_monthly_reports_ow ON monthly_reports(owner_user_id, month DESC);
-CREATE INDEX IF NOT EXISTS idx_daily_tips_owner   ON daily_tips(owner_user_id, tip_date DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_tips_owner    ON daily_tips(owner_user_id, tip_date DESC);
+CREATE INDEX IF NOT EXISTS idx_reflections_owner_k ON reflections(owner_user_id, kind, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reflections_related ON reflections(owner_user_id, kind, related_id);
+CREATE INDEX IF NOT EXISTS idx_reflections_rkey    ON reflections(owner_user_id, kind, related_key);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_owner    ON llm_calls(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_date     ON llm_calls(created_at DESC);
 """

@@ -35,6 +35,7 @@ from routes.practice import bp as practice_bp
 from routes.reports import bp as reports_bp
 from routes.content import bp as content_bp
 from routes.admin_stats import bp as admin_stats_bp
+from routes.reflections import bp as reflections_bp
 
 
 def create_app() -> Flask:
@@ -63,7 +64,7 @@ def create_app() -> Flask:
     # 注册 blueprints
     for bp in (auth_bp, exams_bp, tasks_bp, mistakes_bp,
                uploads_bp, practice_bp, reports_bp, content_bp,
-               admin_stats_bp):
+               admin_stats_bp, reflections_bp):
         app.register_blueprint(bp)
 
     # 启动后台清理 daemon (30 天前的试卷原图). 幂等, 多 worker 每个进程自己起.

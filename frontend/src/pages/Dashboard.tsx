@@ -33,12 +33,7 @@ type DailyTip = {
   skipped?: boolean
 }
 
-// 本周学习笔记的 localStorage key 按用户 id 隔离
-function noteKey(userId: number | undefined, weekOf: string) {
-  return `edu.weekNote.${userId || 'anon'}.${weekOf}`
-}
-
-// 返回本周的 "YYYY-MM-DD (周一)" 作为 key
+// 返回本周的 "YYYY-MM-DD (周一)" 作为 key, 用作 reflections.related_key
 function currentWeekStart(): string {
   const d = new Date()
   const dow = d.getDay() === 0 ? 7 : d.getDay()
@@ -63,33 +58,45 @@ export default function Dashboard() {
   const isParent = user?.role === 'parent'
   const displayName = isParent ? boundStudent?.display_name : user?.display_name
   const weekOf = currentWeekStart()
-  const nKey = noteKey(user?.id, weekOf)
 
   useEffect(() => {
     api.dashboardSummary().then(setSummary).catch(() => {})
     api.dailyTip().then(setTip).catch(() => {})
   }, [])
 
-  // 加载本周笔记
-  useEffect(() => {
-    if (!user?.id) return
-    try {
-      setWeekNote(localStorage.getItem(nKey) || '')
-    } catch {}
-  }, [nKey, user?.id])
-
-  // debounce 保存到 localStorage
+  // 加载本周笔记 (从 reflections 表)
+  const [weekNoteLoaded, setWeekNoteLoaded] = useState(false)
   useEffect(() => {
     if (!user?.id || isParent) return
+    api
+      .listReflections({ kind: 'weekly_note', related_key: weekOf, limit: 1 })
+      .then((items) => {
+        if (items.length > 0) setWeekNote(items[0].content)
+        setWeekNoteLoaded(true)
+      })
+      .catch(() => setWeekNoteLoaded(true))
+  }, [weekOf, user?.id, isParent])
+
+  // debounce 保存到后端 reflections 表
+  useEffect(() => {
+    if (!user?.id || isParent || !weekNoteLoaded) return
+    // 空内容不触发 upsert (后端会 400)
+    if (!weekNote.trim()) return
     const t = window.setTimeout(() => {
-      try {
-        localStorage.setItem(nKey, weekNote)
-        setWeekNoteSaved(true)
-        window.setTimeout(() => setWeekNoteSaved(false), 1500)
-      } catch {}
-    }, 600)
+      api
+        .upsertReflection({
+          kind: 'weekly_note',
+          related_key: weekOf,
+          content: weekNote.trim(),
+        })
+        .then(() => {
+          setWeekNoteSaved(true)
+          window.setTimeout(() => setWeekNoteSaved(false), 1500)
+        })
+        .catch(() => {})
+    }, 800)
     return () => window.clearTimeout(t)
-  }, [weekNote, nKey, user?.id, isParent])
+  }, [weekNote, weekOf, user?.id, isParent, weekNoteLoaded])
 
   // Tip 生成中时自动轮询
   const tipGenerating = tip?.status === 'generating'
@@ -297,12 +304,12 @@ export default function Dashboard() {
 
       {/* 次要入口 */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <QuickLink to="/journal" icon="🕊️" title="日记" desc="写给自己 · 不会被分析" />
         <QuickLink to="/mistakes" icon="📓" title="错题本" desc="记录 + 归因 + 巩固" />
         <QuickLink to="/scan" icon="📸" title="扫试卷" desc="AI 识别错题" />
         <QuickLink to="/practice" icon="🏋️" title="训练" desc="基于错题的类题练习" />
         <QuickLink to="/trends" icon="📈" title="成绩趋势" desc="考试数据和走势" />
         <QuickLink to="/methods" icon="🎯" title="学习方法" desc="各科速查卡" />
-        <QuickLink to="/analysis" icon="📄" title="完整分析" desc="学业诊断与方案" />
       </div>
     </div>
   )

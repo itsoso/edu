@@ -18,14 +18,16 @@ const Scan = lazy(() => import('./pages/Scan'))
 const Practice = lazy(() => import('./pages/Practice'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Settings = lazy(() => import('./pages/Settings'))
+const Journal = lazy(() => import('./pages/Journal'))
 
 const navItems = [
   { to: '/', label: '今日', icon: '🏠', end: true },
+  { to: '/journal', label: '日记', icon: '🕊️' },
+  { to: '/mistakes', label: '错题本', icon: '📓' },
+  { to: '/scan', label: '扫试卷', icon: '📸' },
+  { to: '/practice', label: '训练', icon: '🏋️' },
   { to: '/trends', label: '趋势', icon: '📈' },
   { to: '/plan', label: '计划', icon: '📅' },
-  { to: '/scan', label: '扫试卷', icon: '📸' },
-  { to: '/mistakes', label: '错题本', icon: '📓' },
-  { to: '/practice', label: '训练', icon: '🏋️' },
   { to: '/reports', label: '月度复盘', icon: '🧠' },
   { to: '/methods', label: '方法卡', icon: '🎯' },
   { to: '/analysis', label: '分析', icon: '📄' },
@@ -131,6 +133,7 @@ function Shell() {
             <Route path="/methods" element={<Methods />} />
             <Route path="/analysis" element={<Analysis />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/journal" element={<Journal />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </Suspense>

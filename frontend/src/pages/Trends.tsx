@@ -36,6 +36,7 @@ export default function Trends() {
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState<AddForm>({ ...emptyForm })
   const [grade_rank, setGradeRank] = useState('')
+  const [examFeeling, setExamFeeling] = useState('')
 
   async function reload() {
     const d = await api.listExams()
@@ -70,7 +71,7 @@ export default function Trends() {
       const n = parseFloat(v)
       if (!isNaN(n)) scores[k] = n
     })
-    await api.createExam({
+    const created = await api.createExam({
       exam_name: form.exam_name || '新考试',
       exam_date: form.exam_date || null,
       stage: form.stage,
@@ -78,8 +79,21 @@ export default function Trends() {
       grade_rank: grade_rank ? parseInt(grade_rank) : null,
       scores,
     })
+    // 如果她写了考完感受, 顺便存一条 reflection (永远不喂给 AI)
+    if (examFeeling.trim()) {
+      try {
+        await api.upsertReflection({
+          kind: 'exam_feeling',
+          related_id: created.id,
+          content: examFeeling.trim(),
+        })
+      } catch {
+        // 存感受失败不影响成绩录入
+      }
+    }
     setForm({ ...emptyForm, scores: { ...emptyForm.scores } })
     setGradeRank('')
+    setExamFeeling('')
     setShowAdd(false)
     reload()
   }
@@ -159,6 +173,20 @@ export default function Trends() {
             value={form.notes}
             onChange={(e) => setForm({ ...form, notes: e.target.value })}
           />
+          {/* 考完感受 — 写给自己看, 不会喂给 AI */}
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">
+              这次考完的感受 (可选) · 只给你自己看
+            </label>
+            <textarea
+              className="w-full border border-slate-300 rounded px-3 py-2 text-sm resize-none"
+              placeholder="考试当时的心情, 哪里紧张, 哪里满意, 写两句..."
+              rows={2}
+              maxLength={500}
+              value={examFeeling}
+              onChange={(e) => setExamFeeling(e.target.value)}
+            />
+          </div>
           <button
             onClick={submit}
             className="px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700"
