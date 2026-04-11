@@ -17,6 +17,8 @@ backend/data/*.db-shm
 
 # Flask session secret (首次启动自动生成, 不入库)
 backend/data/.secret_key
+backend/data/.env
+backend/data/uploads/
 
 # Node
 node_modules/

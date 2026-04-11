@@ -39,6 +39,8 @@ rsync -az --delete \
     --exclude='backend/data/*.db' \
     --exclude='backend/data/*.db-journal' \
     --exclude='backend/data/.secret_key' \
+    --exclude='backend/data/.env' \
+    --exclude='backend/data/uploads/' \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
     --exclude='frontend/dist' \
