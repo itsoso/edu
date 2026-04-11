@@ -35,6 +35,10 @@ FULL_MARKS = {"科学": 150, "英语": 120, "数学": 120, "语文": 120, "社�
 
 import os as _os
 
+# 任何启动路径(flask dev / gunicorn / server.py)都确保 schema 是最新的.
+# CREATE TABLE IF NOT EXISTS 是幂等的.
+init_db()
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 app.config["SECRET_KEY"] = get_secret_key()
