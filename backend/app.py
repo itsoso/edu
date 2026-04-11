@@ -4,13 +4,22 @@ App 工厂, 负责:
 - 基础配置 (secret key, cookie, CORS, body size)
 - 初始化 SQLite schema (CREATE TABLE IF NOT EXISTS, 幂等)
 - 注册所有业务 blueprints
+- 启动后台清理 daemon
 
 业务端点按域拆在 routes/ 目录下, 每个 blueprint 一个文件.
 """
+import logging
 import os
 
 from flask import Flask
 from flask_cors import CORS
+
+# 生产环境 gunicorn 把 stdout/stderr 捕获到 /var/log/edu/backend.{log,err}
+# 这里统一配 basicConfig 让各模块的 logger 都能输出到那里
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 from db import init_db
 from auth import get_secret_key

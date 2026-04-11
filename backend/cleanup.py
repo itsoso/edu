@@ -11,7 +11,6 @@
 import logging
 import threading
 import time
-from pathlib import Path
 
 from db import db
 from constants import UPLOAD_DIR
