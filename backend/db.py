@@ -88,14 +88,62 @@ CREATE TABLE IF NOT EXISTS mistakes (
     FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_exams_owner    ON exams(owner_user_id, sort_order);
-CREATE INDEX IF NOT EXISTS idx_scores_exam    ON scores(exam_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_owner    ON tasks(owner_user_id, week, day_of_week);
-CREATE INDEX IF NOT EXISTS idx_checkins_task  ON checkins(task_id, checkin_date);
-CREATE INDEX IF NOT EXISTS idx_checkins_date  ON checkins(checkin_date);
-CREATE INDEX IF NOT EXISTS idx_mistakes_owner ON mistakes(owner_user_id, subject);
-CREATE INDEX IF NOT EXISTS idx_users_student  ON users(student_id);
-CREATE INDEX IF NOT EXISTS idx_users_code     ON users(join_code);
+-- 试卷上传: 原图 + LLM 分析结果缓存
+CREATE TABLE IF NOT EXISTS exam_uploads (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id    INTEGER NOT NULL,
+    file_path        TEXT    NOT NULL,              -- 相对 data/uploads/ 的路径
+    file_name        TEXT,                          -- 原始文件名
+    subject          TEXT,                          -- LLM 识别的科目
+    exam_name        TEXT,                          -- 用户填写的考试名
+    status           TEXT    DEFAULT 'uploaded',    -- uploaded|extracted|analyzed|failed
+    extracted_json   TEXT,                          -- /mistakes 抽取结果 (JSON)
+    analysis_json    TEXT,                          -- /analysis 全卷分析 (JSON)
+    error_message    TEXT,
+    created_at       TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- 训练题集: 基于哪道错题生成的
+CREATE TABLE IF NOT EXISTS practice_sets (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id     INTEGER NOT NULL,
+    source_mistake_id INTEGER,                      -- 可空: 也允许不绑定错题
+    title             TEXT    NOT NULL,
+    subject           TEXT,
+    knowledge_point   TEXT,
+    created_at        TEXT    DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id)     REFERENCES users(id)     ON DELETE CASCADE,
+    FOREIGN KEY (source_mistake_id) REFERENCES mistakes(id)  ON DELETE SET NULL
+);
+
+-- 训练题条目
+CREATE TABLE IF NOT EXISTS practice_items (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    set_id           INTEGER NOT NULL,
+    question_text    TEXT    NOT NULL,
+    expected_answer  TEXT,
+    solution_steps   TEXT,
+    difficulty       TEXT,
+    student_answer   TEXT,
+    is_correct       INTEGER,                       -- NULL=未作答, 0=错, 1=对
+    score            INTEGER,                       -- 0-100
+    feedback         TEXT,
+    graded_at        TEXT,
+    FOREIGN KEY (set_id) REFERENCES practice_sets(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_exams_owner        ON exams(owner_user_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_scores_exam        ON scores(exam_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_owner        ON tasks(owner_user_id, week, day_of_week);
+CREATE INDEX IF NOT EXISTS idx_checkins_task      ON checkins(task_id, checkin_date);
+CREATE INDEX IF NOT EXISTS idx_checkins_date      ON checkins(checkin_date);
+CREATE INDEX IF NOT EXISTS idx_mistakes_owner     ON mistakes(owner_user_id, subject);
+CREATE INDEX IF NOT EXISTS idx_users_student      ON users(student_id);
+CREATE INDEX IF NOT EXISTS idx_users_code         ON users(join_code);
+CREATE INDEX IF NOT EXISTS idx_uploads_owner      ON exam_uploads(owner_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_practice_sets_own  ON practice_sets(owner_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_practice_items_set ON practice_items(set_id);
 """
 
 

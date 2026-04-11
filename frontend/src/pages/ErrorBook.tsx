@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { api, Mistake } from '../api'
 
 const SUBJECTS = ['数学', '科学', '英语', '语文', '社会']
@@ -25,12 +26,14 @@ const empty: Form = {
 }
 
 export default function ErrorBook() {
+  const nav = useNavigate()
   const [mistakes, setMistakes] = useState<Mistake[]>([])
   const [stats, setStats] = useState<{ by_reason: any[]; by_subject: any[] }>({ by_reason: [], by_subject: [] })
   const [filterSubject, setFilterSubject] = useState<string>('')
   const [filterStatus, setFilterStatus] = useState<'' | '0' | '1'>('')
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState<Form>({ ...empty })
+  const [generatingId, setGeneratingId] = useState<number | null>(null)
 
   async function reload() {
     const [list, st] = await Promise.all([
@@ -69,6 +72,20 @@ export default function ErrorBook() {
     reload()
   }
 
+  async function generatePractice(id: number) {
+    setGeneratingId(id)
+    try {
+      const set = await api.generatePractice(id, 3)
+      nav('/practice')
+      // 刷一下让 Practice 页面看到
+      await new Promise((r) => setTimeout(r, 100))
+    } catch (e: any) {
+      alert('生成失败: ' + (e.message || e))
+    } finally {
+      setGeneratingId(null)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -76,12 +93,20 @@ export default function ErrorBook() {
           <h1 className="text-2xl font-bold">错题本</h1>
           <p className="text-slate-500 mt-1 text-sm">记录 → 归因 → 重做 → 标记掌握</p>
         </div>
-        <button
-          onClick={() => setShowAdd((v) => !v)}
-          className="px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700"
-        >
-          {showAdd ? '取消' : '+ 添加错题'}
-        </button>
+        <div className="flex gap-2">
+          <Link
+            to="/scan"
+            className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm"
+          >
+            📸 扫描试卷
+          </Link>
+          <button
+            onClick={() => setShowAdd((v) => !v)}
+            className="px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 text-sm"
+          >
+            {showAdd ? '取消' : '+ 手动添加'}
+          </button>
+        </div>
       </div>
 
       {/* 统计 */}
@@ -266,6 +291,13 @@ export default function ErrorBook() {
                   )}
                 </div>
                 <div className="flex flex-col gap-1">
+                  <button
+                    onClick={() => generatePractice(m.id)}
+                    disabled={generatingId === m.id}
+                    className="text-xs px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {generatingId === m.id ? '出题中...' : '🏋️ 生成类题'}
+                  </button>
                   <button
                     onClick={() => toggleMastered(m)}
                     className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-slate-50 whitespace-nowrap"

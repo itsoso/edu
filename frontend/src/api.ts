@@ -77,6 +77,66 @@ export type Checkin = {
   note: string | null
 }
 
+export type ExtractedMistake = {
+  question_number?: string
+  question_text?: string
+  wrong_answer?: string
+  correct_answer?: string
+  reason_guess?: string
+  knowledge_point?: string
+  confidence?: number
+}
+
+export type ExamAnalysis = {
+  subject?: string
+  exam_estimate?: string
+  estimated_score?: string
+  strengths?: string[]
+  weaknesses?: string[]
+  knowledge_gaps?: string[]
+  advice?: string
+  priority_focus?: string
+}
+
+export type ExamUpload = {
+  id: number
+  owner_user_id: number
+  file_path: string
+  file_name: string
+  subject: string | null
+  exam_name: string | null
+  status: 'uploaded' | 'extracted' | 'analyzed' | 'failed'
+  image_url: string
+  created_at: string
+  error_message: string | null
+  extracted?: { subject?: string; mistakes?: ExtractedMistake[] } | null
+  analysis?: ExamAnalysis | null
+}
+
+export type PracticeItem = {
+  id: number
+  set_id: number
+  question_text: string
+  expected_answer: string | null
+  solution_steps: string | null
+  difficulty: string | null
+  student_answer: string | null
+  is_correct: number | null
+  score: number | null
+  feedback: string | null
+  graded_at: string | null
+}
+
+export type PracticeSet = {
+  id: number
+  source_mistake_id: number | null
+  title: string
+  subject: string | null
+  knowledge_point: string | null
+  created_at: string
+  items: PracticeItem[]
+}
+
 export type Mistake = {
   id: number
   subject: string
@@ -158,4 +218,50 @@ export const api = {
   getContent: (name: string) =>
     request<{ name: string; content: string }>(`/content/${name}`),
   listContent: () => request<{ name: string; title: string }[]>('/content'),
+
+  // LLM
+  llmStatus: () => request<{ configured: boolean; model: string }>('/llm/status'),
+
+  // Uploads (试卷照片)
+  listUploads: () => request<ExamUpload[]>('/uploads'),
+  getUpload: (id: number) => request<ExamUpload>(`/uploads/${id}`),
+  uploadExamImage: async (file: File, examName?: string) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    if (examName) fd.append('exam_name', examName)
+    const res = await fetch('/api/uploads', {
+      method: 'POST',
+      credentials: 'include',
+      body: fd,
+    })
+    if (!res.ok) throw new ApiError(res.status, await res.text())
+    return res.json() as Promise<ExamUpload>
+  },
+  deleteUpload: (id: number) =>
+    request<{ ok: boolean }>(`/uploads/${id}`, { method: 'DELETE' }),
+  extractMistakes: (uploadId: number) =>
+    request<ExamUpload>(`/uploads/${uploadId}/extract`, { method: 'POST' }),
+  analyzeUpload: (uploadId: number) =>
+    request<ExamUpload>(`/uploads/${uploadId}/analyze`, { method: 'POST' }),
+  saveExtractedMistakes: (uploadId: number, indices: number[]) =>
+    request<{ saved: number; ids: number[] }>(`/uploads/${uploadId}/save-mistakes`, {
+      method: 'POST',
+      body: JSON.stringify({ indices }),
+    }),
+
+  // Practice (二次训练)
+  listPracticeSets: () => request<PracticeSet[]>('/practice'),
+  getPracticeSet: (id: number) => request<PracticeSet>(`/practice/${id}`),
+  generatePractice: (mistakeId: number, count: number = 3) =>
+    request<PracticeSet>(`/mistakes/${mistakeId}/generate-practice`, {
+      method: 'POST',
+      body: JSON.stringify({ count }),
+    }),
+  gradePracticeItem: (itemId: number, studentAnswer: string) =>
+    request<PracticeItem>(`/practice/items/${itemId}/grade`, {
+      method: 'POST',
+      body: JSON.stringify({ student_answer: studentAnswer }),
+    }),
+  deletePracticeSet: (id: number) =>
+    request<{ ok: boolean }>(`/practice/${id}`, { method: 'DELETE' }),
 }

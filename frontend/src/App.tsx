@@ -9,12 +9,16 @@ import Methods from './pages/Methods'
 import Analysis from './pages/Analysis'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import Scan from './pages/Scan'
+import Practice from './pages/Practice'
 
 const navItems = [
   { to: '/', label: '今日', icon: '🏠', end: true },
   { to: '/trends', label: '趋势', icon: '📈' },
   { to: '/plan', label: '计划', icon: '📅' },
+  { to: '/scan', label: '扫试卷', icon: '📸' },
   { to: '/mistakes', label: '错题本', icon: '📓' },
+  { to: '/practice', label: '训练', icon: '🏋️' },
   { to: '/methods', label: '方法卡', icon: '🎯' },
   { to: '/analysis', label: '分析', icon: '📄' },
 ]
@@ -102,7 +106,9 @@ function Shell() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/trends" element={<Trends />} />
           <Route path="/plan" element={<Plan />} />
+          <Route path="/scan" element={<Scan />} />
           <Route path="/mistakes" element={<ErrorBook />} />
+          <Route path="/practice" element={<Practice />} />
           <Route path="/methods" element={<Methods />} />
           <Route path="/analysis" element={<Analysis />} />
           <Route path="*" element={<Navigate to="/" />} />
