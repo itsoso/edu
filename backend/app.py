@@ -20,11 +20,20 @@ CONTENT_DIR = BASE_DIR / "content"
 SUBJECTS = ["科学", "英语", "数学", "语文", "社会"]
 FULL_MARKS = {"科学": 150, "英语": 120, "数学": 120, "语文": 120, "社会": 100}
 
+import os as _os
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = get_secret_key()
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-CORS(app, supports_credentials=True, origins=["http://127.0.0.1:5173", "http://localhost:5173"])
+# 生产环境 (EDU_ENV=prod) 走 HTTPS 时强制 Secure cookie
+if _os.environ.get("EDU_ENV") == "prod":
+    app.config["SESSION_COOKIE_SECURE"] = True
+    app.config["PREFERRED_URL_SCHEME"] = "https"
+    # 生产环境由 nginx 统一域名, 同源无需 CORS
+    CORS(app, supports_credentials=True)
+else:
+    CORS(app, supports_credentials=True, origins=["http://127.0.0.1:5173", "http://localhost:5173"])
 
 
 # ---------- Auth ----------

@@ -1,0 +1,18 @@
+[Unit]
+Description=edu 学习系统后端 (Flask + gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/edu/backend
+Environment="EDU_ENV=prod"
+Environment="PATH=/opt/edu/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/opt/edu/venv/bin/gunicorn -c /opt/edu/deploy/gunicorn.conf.py app:app
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:/var/log/edu/backend.log
+StandardError=append:/var/log/edu/backend.err
+
+[Install]
+WantedBy=multi-user.target
