@@ -15,6 +15,7 @@ from llm import (
     GENERATE_PRACTICE_PROMPT, GRADE_PRACTICE_PROMPT,
     parse_json_or_retry,
 )
+from llm_audit import llm_audit
 from background import submit as bg_submit
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def get_practice_set(set_id):
 
 
 def _run_generate_practice_bg(
-    set_id: int, mistake_snapshot: dict, count: int
+    set_id: int, mistake_snapshot: dict, count: int, owner_id: int
 ):
     """后台: 调 LLM 出题, 写入 practice_items, 把 set 状态改成 done."""
     prompt = GENERATE_PRACTICE_PROMPT.format(
@@ -69,11 +70,14 @@ def _run_generate_practice_bg(
     )
     try:
         llm = get_llm()
-        raw = llm.chat(
-            [{"role": "system", "content": "你是一位资深初中教师, 擅长出类题。"},
-             {"role": "user", "content": prompt}],
-            temperature=0.4, max_tokens=2500, response_format_json=True,
-        )
+        with llm_audit("generate_practice", owner_id=owner_id, model=llm.model) as audit:
+            audit.set_prompt_chars(len(prompt))
+            raw = llm.chat(
+                [{"role": "system", "content": "你是一位资深初中教师, 擅长出类题。"},
+                 {"role": "user", "content": prompt}],
+                temperature=0.4, max_tokens=2500, response_format_json=True,
+            )
+            audit.set_response_chars(len(raw))
         data = parse_json_or_retry(llm, raw)
         items = data.get("items") if isinstance(data, dict) else None
         if not items:
@@ -145,7 +149,7 @@ def generate_practice_from_mistake(mid):
         row = conn.execute("SELECT * FROM practice_sets WHERE id = ?", (set_id,)).fetchone()
         resp = _set_to_dict(conn, row)
 
-    bg_submit(_run_generate_practice_bg, set_id, mistake_snapshot, count)
+    bg_submit(_run_generate_practice_bg, set_id, mistake_snapshot, count, g.owner_id)
     return jsonify(resp), 202
 
 
@@ -176,11 +180,14 @@ def grade_practice_item(item_id):
     )
     try:
         llm = get_llm()
-        raw = llm.chat(
-            [{"role": "system", "content": "你是严谨但友善的初中老师, 批改要中肯。"},
-             {"role": "user", "content": prompt}],
-            temperature=0.1, max_tokens=600, response_format_json=True,
-        )
+        with llm_audit("grade_practice", owner_id=g.owner_id, model=llm.model) as audit:
+            audit.set_prompt_chars(len(prompt))
+            raw = llm.chat(
+                [{"role": "system", "content": "你是严谨但友善的初中老师, 批改要中肯。"},
+                 {"role": "user", "content": prompt}],
+                temperature=0.1, max_tokens=600, response_format_json=True,
+            )
+            audit.set_response_chars(len(raw))
         data = parse_json_or_retry(llm, raw)
     except LLMError as e:
         return jsonify({"error": "llm_error", "detail": str(e)}), 502

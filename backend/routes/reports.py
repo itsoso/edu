@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request, abort, g
 from db import db, row_to_dict, rows_to_dicts
 from auth import login_required
 from llm import get_llm, LLMError, MONTHLY_REPORT_PROMPT
+from llm_audit import llm_audit
 from background import submit as bg_submit
 
 logger = logging.getLogger(__name__)
@@ -231,21 +232,24 @@ def get_monthly_report(month):
     return jsonify(_report_to_dict(row))
 
 
-def _run_monthly_report_bg(report_id: int, metrics: dict):
+def _run_monthly_report_bg(report_id: int, metrics: dict, owner_id: int):
     """后台: 调 LLM 写报告, 更新 monthly_reports."""
     from routes.reports import _format_metrics_for_prompt as _fmt  # self-import 避免循环
     prompt_vars = _fmt(metrics)
     prompt = MONTHLY_REPORT_PROMPT.format(**prompt_vars)
     try:
         llm = get_llm()
-        content_md = llm.chat(
-            [
-                {"role": "system", "content": "你是一位温暖、务实的初中老师。"},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.5,
-            max_tokens=2500,
-        )
+        with llm_audit("monthly_report", owner_id=owner_id, model=llm.model) as audit:
+            audit.set_prompt_chars(len(prompt))
+            content_md = llm.chat(
+                [
+                    {"role": "system", "content": "你是一位温暖、务实的初中老师。"},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.5,
+                max_tokens=2500,
+            )
+            audit.set_response_chars(len(content_md))
         if content_md.startswith("```"):
             content_md = content_md.strip("`")
             if content_md.lower().startswith("markdown"):
@@ -314,7 +318,7 @@ def generate_monthly_report(month):
 
         row = conn.execute("SELECT * FROM monthly_reports WHERE id = ?", (rid,)).fetchone()
 
-    bg_submit(_run_monthly_report_bg, rid, metrics)
+    bg_submit(_run_monthly_report_bg, rid, metrics, g.owner_id)
     return jsonify(_report_to_dict(row)), 202
 
 

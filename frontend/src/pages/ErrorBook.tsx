@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, Mistake } from '../api'
+import { useToast } from '../components/Toast'
 
 const SUBJECTS = ['数学', '科学', '英语', '语文', '社会']
 const REASONS = ['计算错', '审题漏', '不会做', '步骤乱', '知识遗忘', '其他']
@@ -29,6 +30,7 @@ const PAGE_SIZE = 50
 
 export default function ErrorBook() {
   const nav = useNavigate()
+  const toast = useToast()
   const [mistakes, setMistakes] = useState<Mistake[]>([])
   const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -101,12 +103,11 @@ export default function ErrorBook() {
   async function generatePractice(id: number) {
     setGeneratingId(id)
     try {
-      const set = await api.generatePractice(id, 3)
+      await api.generatePractice(id, 3)
+      toast.info('AI 正在出题, 约 15-25 秒')
       nav('/practice')
-      // 刷一下让 Practice 页面看到
-      await new Promise((r) => setTimeout(r, 100))
     } catch (e: any) {
-      alert('生成失败: ' + (e.message || e))
+      toast.error('生成失败: ' + (e.message || e))
     } finally {
       setGeneratingId(null)
     }

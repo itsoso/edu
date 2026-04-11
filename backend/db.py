@@ -119,6 +119,21 @@ CREATE TABLE IF NOT EXISTS practice_sets (
     FOREIGN KEY (source_mistake_id) REFERENCES mistakes(id)  ON DELETE SET NULL
 );
 
+-- LLM 调用审计日志 (成本/性能追踪)
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id  INTEGER,                       -- 可空 (后台任务时可能没 owner 上下文)
+    endpoint       TEXT,                          -- 例: extract_mistakes / generate_practice
+    model          TEXT,
+    prompt_chars   INTEGER,                       -- 用字符数作为 token 代理
+    response_chars INTEGER,
+    latency_ms     INTEGER,
+    status         TEXT,                          -- ok | error
+    error_message  TEXT,
+    created_at     TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- 月度复盘报告 (LLM 生成, 按 month 缓存)
 CREATE TABLE IF NOT EXISTS monthly_reports (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,6 +176,8 @@ CREATE INDEX IF NOT EXISTS idx_uploads_owner      ON exam_uploads(owner_user_id,
 CREATE INDEX IF NOT EXISTS idx_practice_sets_own  ON practice_sets(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_practice_items_set ON practice_items(set_id);
 CREATE INDEX IF NOT EXISTS idx_monthly_reports_ow ON monthly_reports(owner_user_id, month DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_owner    ON llm_calls(owner_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_date     ON llm_calls(created_at DESC);
 """
 
 

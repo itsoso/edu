@@ -253,6 +253,20 @@ export const api = {
   // LLM
   llmStatus: () => request<{ configured: boolean; model: string }>('/llm/status'),
 
+  // LLM 用量统计
+  llmUsage: () =>
+    request<{
+      recent_7d: { date: string; calls: number; prompt_chars: number; response_chars: number; avg_latency_ms: number }[]
+      by_endpoint: { endpoint: string; calls: number; avg_latency_ms: number; total_chars: number }[]
+      totals: {
+        calls: number
+        ok: number
+        errors: number
+        total_prompt_chars: number
+        total_response_chars: number
+      }
+    }>('/stats/llm/usage'),
+
   // Dashboard summary (streak/训练/错题 等)
   dashboardSummary: () =>
     request<{

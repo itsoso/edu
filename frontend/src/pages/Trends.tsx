@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useIsDesktop } from '../hooks/useMediaQuery'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
@@ -29,6 +30,7 @@ const emptyForm: AddForm = {
 }
 
 export default function Trends() {
+  const isDesktop = useIsDesktop()
   const [exams, setExams] = useState<Exam[]>([])
   const [tab, setTab] = useState<'subjects' | 'total' | 'rank'>('subjects')
   const [showAdd, setShowAdd] = useState(false)
@@ -45,20 +47,21 @@ export default function Trends() {
 
   const chartData = useMemo(
     () =>
-      exams.map((e) => {
+      exams.map((e, idx) => {
         const row: any = {
+          // 完整标签 (用于 tooltip/desktop), 短标签 (用于手机 X 轴)
           name: `${e.stage || ''}${e.exam_name}`,
+          shortName: isDesktop ? `${e.stage || ''}${e.exam_name}` : `#${idx + 1}`,
           total: e.total,
           rank: e.grade_rank,
         }
         SUBJECTS.forEach((s) => {
           row[s.key] = e.scores[s.key] ?? null
-          // 换算得分率百分比方便同图对比
           row[`${s.key}_pct`] = e.scores[s.key] != null ? (e.scores[s.key] / s.full) * 100 : null
         })
         return row
       }),
-    [exams]
+    [exams, isDesktop]
   )
 
   async function submit() {
@@ -183,13 +186,29 @@ export default function Trends() {
             </button>
           ))}
         </div>
-        <div style={{ width: '100%', height: 380 }}>
+        <div style={{ width: '100%', height: isDesktop ? 380 : 320 }}>
           <ResponsiveContainer>
-            <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 60 }}>
+            <LineChart
+              data={chartData}
+              margin={{
+                top: 10,
+                right: isDesktop ? 20 : 8,
+                left: isDesktop ? 0 : -20,
+                bottom: isDesktop ? 60 : 8,
+              }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="name" angle={-30} textAnchor="end" height={80} fontSize={11} />
+              <XAxis
+                dataKey="shortName"
+                angle={isDesktop ? -30 : 0}
+                textAnchor={isDesktop ? 'end' : 'middle'}
+                height={isDesktop ? 80 : 24}
+                interval={isDesktop ? 0 : 'preserveEnd'}
+                fontSize={isDesktop ? 11 : 9}
+              />
               <YAxis
-                fontSize={11}
+                fontSize={isDesktop ? 11 : 9}
+                width={isDesktop ? 50 : 32}
                 domain={
                   tab === 'rank'
                     ? ['auto', 'auto']
@@ -198,14 +217,24 @@ export default function Trends() {
                     : [60, 100]
                 }
                 reversed={tab === 'rank'}
-                label={{
-                  value: tab === 'rank' ? '名次' : tab === 'total' ? '总分' : '得分率 %',
-                  angle: -90,
-                  position: 'insideLeft',
+                label={
+                  isDesktop
+                    ? {
+                        value: tab === 'rank' ? '名次' : tab === 'total' ? '总分' : '得分率 %',
+                        angle: -90,
+                        position: 'insideLeft',
+                      }
+                    : undefined
+                }
+              />
+              <Tooltip
+                labelFormatter={(shortName: any, payload: any) => {
+                  // 移动端显示 #N, tooltip 里显示完整名字
+                  const row = payload?.[0]?.payload
+                  return row?.name || shortName
                 }}
               />
-              <Tooltip />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: isDesktop ? 12 : 10 }} />
               {tab === 'subjects' &&
                 SUBJECTS.map((s) => (
                   <Line

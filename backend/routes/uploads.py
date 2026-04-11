@@ -17,6 +17,7 @@ from llm import (
     EXTRACT_MISTAKES_PROMPT, FULL_ANALYSIS_PROMPT,
     parse_json_or_retry,
 )
+from llm_audit import llm_audit
 from constants import UPLOAD_DIR, ALLOWED_IMAGE_EXT
 from background import submit as bg_submit
 
@@ -154,7 +155,7 @@ def delete_upload(upload_id):
 
 
 # ---------- LLM 抽取 / 分析 (异步) ----------
-def _run_extract_bg(upload_id: int, file_path_str: str):
+def _run_extract_bg(upload_id: int, file_path_str: str, owner_id: int):
     """后台线程: 调 vision LLM 抽错题, 写回 DB.
 
     不能碰 Flask g/session/request. 所有参数必须从请求线程拷贝.
@@ -162,7 +163,10 @@ def _run_extract_bg(upload_id: int, file_path_str: str):
     path = UPLOAD_DIR / file_path_str
     try:
         llm = get_llm()
-        raw = llm.vision_chat(EXTRACT_MISTAKES_PROMPT, [path], max_tokens=3500)
+        with llm_audit("extract_mistakes", owner_id=owner_id, model=llm.model) as audit:
+            audit.set_prompt_chars(len(EXTRACT_MISTAKES_PROMPT))
+            raw = llm.vision_chat(EXTRACT_MISTAKES_PROMPT, [path], max_tokens=3500)
+            audit.set_response_chars(len(raw))
         data = parse_json_or_retry(llm, raw)
         subject = (data.get("subject") if isinstance(data, dict) else None) or None
         with db() as conn:
@@ -183,11 +187,14 @@ def _run_extract_bg(upload_id: int, file_path_str: str):
             )
 
 
-def _run_analyze_bg(upload_id: int, file_path_str: str, prev_status: str):
+def _run_analyze_bg(upload_id: int, file_path_str: str, prev_status: str, owner_id: int):
     path = UPLOAD_DIR / file_path_str
     try:
         llm = get_llm()
-        raw = llm.vision_chat(FULL_ANALYSIS_PROMPT, [path], max_tokens=2500)
+        with llm_audit("analyze_upload", owner_id=owner_id, model=llm.model) as audit:
+            audit.set_prompt_chars(len(FULL_ANALYSIS_PROMPT))
+            raw = llm.vision_chat(FULL_ANALYSIS_PROMPT, [path], max_tokens=2500)
+            audit.set_response_chars(len(raw))
         data = parse_json_or_retry(llm, raw)
         # 保持 extracted 状态不丢 (如果之前已经 extracted)
         new_status = "extracted" if prev_status == "extracted" else "analyzed"
@@ -223,7 +230,8 @@ def extract_mistakes_from_upload(upload_id):
         )
         row = conn.execute("SELECT * FROM exam_uploads WHERE id = ?", (upload_id,)).fetchone()
     file_path_str = row["file_path"]
-    bg_submit(_run_extract_bg, upload_id, file_path_str)
+    owner_id = g.owner_id
+    bg_submit(_run_extract_bg, upload_id, file_path_str, owner_id)
     return jsonify(_upload_to_dict(row)), 202
 
 
@@ -242,7 +250,8 @@ def full_analysis_of_upload(upload_id):
         )
         row = conn.execute("SELECT * FROM exam_uploads WHERE id = ?", (upload_id,)).fetchone()
     file_path_str = row["file_path"]
-    bg_submit(_run_analyze_bg, upload_id, file_path_str, prev_status)
+    owner_id = g.owner_id
+    bg_submit(_run_analyze_bg, upload_id, file_path_str, prev_status, owner_id)
     return jsonify(_upload_to_dict(row)), 202
 
 

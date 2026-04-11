@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { api, ExamUpload, ExtractedMistake } from '../api'
 import { compressImage, stitchImagesVertical, formatBytes } from '../utils/compressImage'
 import { usePolling } from '../hooks/usePolling'
+import { useToast } from '../components/Toast'
 
 export default function Scan() {
+  const toast = useToast()
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploads, setUploads] = useState<ExamUpload[]>([])
   const [examName, setExamName] = useState('')
@@ -111,16 +113,16 @@ export default function Scan() {
   async function save() {
     if (!active) return
     if (selected.size === 0) {
-      setErr('请至少选择一道要保存的错题')
+      toast.error('请至少选择一道要保存的错题')
       return
     }
     setBusy('保存中...')
     try {
       const res = await api.saveExtractedMistakes(active.id, Array.from(selected))
-      setBusy(`✓ 已保存 ${res.saved} 道错题到错题本`)
-      setTimeout(() => setBusy(''), 2500)
+      toast.success(`已保存 ${res.saved} 道错题到错题本`)
     } catch (e: any) {
-      setErr(e.message || String(e))
+      toast.error('保存失败: ' + (e.message || e))
+    } finally {
       setBusy('')
     }
   }

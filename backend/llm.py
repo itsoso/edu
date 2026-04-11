@@ -12,26 +12,14 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 
 DEFAULT_BASE_URL = "https://bot.executor.life/v1"
 DEFAULT_MODEL = "openclaw"
 ENV_FILE = Path(__file__).parent / "data" / ".env"
 
-
-def _load_env_file():
-    """Minimal .env loader (no deps): KEY=value, ignores comments."""
-    if not ENV_FILE.exists():
-        return
-    for line in ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line and line.split("=", 1)[0] not in os.environ:
-            k, v = line.split("=", 1)
-            os.environ[k.strip()] = v.strip().strip('"').strip("'")
-
-
-_load_env_file()
+# 加载 .env. override=False 保证真实环境变量优先, 不被文件覆盖
+load_dotenv(ENV_FILE, override=False)
 
 
 class LLMError(Exception):

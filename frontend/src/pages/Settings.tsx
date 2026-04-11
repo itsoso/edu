@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useAuth } from '../auth'
@@ -10,6 +10,11 @@ export default function Settings() {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [usage, setUsage] = useState<any>(null)
+
+  useEffect(() => {
+    api.llmUsage().then(setUsage).catch(() => {})
+  }, [])
 
   async function handleLogout() {
     await logout()
@@ -63,6 +68,45 @@ export default function Settings() {
           )}
         </div>
       </div>
+
+      {/* AI 用量统计 */}
+      {usage && usage.totals.calls > 0 && (
+        <div className="bg-white border border-slate-200 rounded-lg p-5 space-y-3">
+          <div className="font-semibold">AI 用量</div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <div className="text-2xl font-bold">{usage.totals.calls}</div>
+              <div className="text-xs text-slate-500">总调用</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-green-600">{usage.totals.ok}</div>
+              <div className="text-xs text-slate-500">成功</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-red-500">{usage.totals.errors}</div>
+              <div className="text-xs text-slate-500">失败</div>
+            </div>
+          </div>
+          {usage.by_endpoint.length > 0 && (
+            <div className="text-xs text-slate-600 space-y-1 pt-2 border-t border-slate-100">
+              <div className="font-medium mb-1">按端点</div>
+              {usage.by_endpoint.slice(0, 5).map((e: any) => (
+                <div key={e.endpoint} className="flex justify-between">
+                  <span className="truncate mr-2">{e.endpoint}</span>
+                  <span className="text-slate-500">
+                    {e.calls} 次 · 平均 {Math.round(e.avg_latency_ms / 1000)}s
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="text-xs text-slate-400">
+            累计字符数 (prompt + response): {(
+              (usage.totals.total_prompt_chars + usage.totals.total_response_chars) / 1000
+            ).toFixed(1)}K
+          </div>
+        </div>
+      )}
 
       {/* 退出登录 */}
       <div className="bg-white border border-slate-200 rounded-lg p-5 flex items-center justify-between">
