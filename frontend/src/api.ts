@@ -105,7 +105,13 @@ export type ExamUpload = {
   file_name: string
   subject: string | null
   exam_name: string | null
-  status: 'uploaded' | 'extracted' | 'analyzed' | 'failed'
+  status:
+    | 'uploaded'
+    | 'extracting'
+    | 'extracted'
+    | 'analyzing'
+    | 'analyzed'
+    | 'failed'
   image_url: string
   created_at: string
   error_message: string | null
@@ -133,6 +139,8 @@ export type PracticeSet = {
   title: string
   subject: string | null
   knowledge_point: string | null
+  status?: 'generating' | 'done' | 'failed'
+  error_message?: string | null
   created_at: string
   items: PracticeItem[]
 }
@@ -271,13 +279,22 @@ export const api = {
       id?: number
       content_md?: string
       metrics?: any
+      status?: 'generating' | 'done' | 'failed'
+      error_message?: string | null
       created_at?: string
     }>(`/reports/monthly/${month}`),
   generateMonthlyReport: (month: string, force: boolean = false) =>
-    request<{ id: number; month: string; content_md: string; metrics: any }>(
-      `/reports/monthly/${month}/generate`,
-      { method: 'POST', body: JSON.stringify({ force }) }
-    ),
+    request<{
+      id: number
+      month: string
+      content_md: string
+      metrics: any
+      status?: 'generating' | 'done' | 'failed'
+      error_message?: string | null
+    }>(`/reports/monthly/${month}/generate`, {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    }),
   deleteMonthlyReport: (month: string) =>
     request<{ ok: boolean }>(`/reports/monthly/${month}`, { method: 'DELETE' }),
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, ExamUpload, ExtractedMistake } from '../api'
 import { compressImage, stitchImagesVertical, formatBytes } from '../utils/compressImage'
+import { usePolling } from '../hooks/usePolling'
 
 export default function Scan() {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -29,6 +30,20 @@ export default function Scan() {
   useEffect(() => {
     reload()
   }, [])
+
+  // 当 active 处于 extracting/analyzing 状态时, 启动轮询
+  const isProcessing =
+    active?.status === 'extracting' || active?.status === 'analyzing'
+  usePolling(
+    async () => {
+      if (!active) return null
+      const u = await api.getUpload(active.id)
+      setActive(u)
+      return u
+    },
+    (u: any) => !!u && (u.status === 'extracting' || u.status === 'analyzing'),
+    { interval: 2500, enabled: !!active && isProcessing }
+  )
 
   async function upload(files: File[]) {
     if (files.length === 0) return
@@ -62,23 +77,20 @@ export default function Scan() {
 
   async function extract() {
     if (!active) return
-    setBusy('AI 正在识别错题...（约 10~30 秒）')
     setErr('')
     try {
+      // 立即返回 status=extracting, 之后 usePolling 自动轮询到 done/failed
       const u = await api.extractMistakes(active.id)
       setActive(u)
-      setSelected(new Set(u.extracted?.mistakes?.map((_, i) => i) || []))
+      setSelected(new Set())
       await reload()
     } catch (e: any) {
       setErr(e.message || String(e))
-    } finally {
-      setBusy('')
     }
   }
 
   async function analyze() {
     if (!active) return
-    setBusy('AI 正在做全卷分析...（约 15~40 秒）')
     setErr('')
     try {
       const u = await api.analyzeUpload(active.id)
@@ -86,10 +98,15 @@ export default function Scan() {
       await reload()
     } catch (e: any) {
       setErr(e.message || String(e))
-    } finally {
-      setBusy('')
     }
   }
+
+  // 识别刚完成时自动选中所有错题
+  useEffect(() => {
+    if (active?.status === 'extracted' && active.extracted?.mistakes?.length) {
+      setSelected(new Set(active.extracted.mistakes.map((_, i) => i)))
+    }
+  }, [active?.id, active?.status, active?.extracted?.mistakes?.length])
 
   async function save() {
     if (!active) return
@@ -241,21 +258,34 @@ export default function Scan() {
                 </button>
               </div>
 
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap items-center">
                 <button
                   onClick={extract}
-                  disabled={!!busy || llmReady === false}
+                  disabled={!!busy || llmReady === false || isProcessing}
                   className="px-3 py-1.5 text-sm bg-brand-600 text-white rounded disabled:opacity-50"
                 >
-                  {mistakes.length ? '🔄 重新识别' : '🔍 识别错题'}
+                  {active?.status === 'extracting'
+                    ? '⏳ 识别中...'
+                    : mistakes.length
+                    ? '🔄 重新识别'
+                    : '🔍 识别错题'}
                 </button>
                 <button
                   onClick={analyze}
-                  disabled={!!busy || llmReady === false}
+                  disabled={!!busy || llmReady === false || isProcessing}
                   className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded disabled:opacity-50"
                 >
-                  {analysis ? '🔄 重新分析' : '📊 全卷分析'}
+                  {active?.status === 'analyzing'
+                    ? '⏳ 分析中...'
+                    : analysis
+                    ? '🔄 重新分析'
+                    : '📊 全卷分析'}
                 </button>
+                {isProcessing && (
+                  <span className="text-xs text-slate-500">
+                    AI 处理大约 10-40 秒, 你可以切到其他页面, 稍后回来看结果
+                  </span>
+                )}
               </div>
 
               {/* 错题列表 */}
@@ -314,7 +344,16 @@ export default function Scan() {
 }
 
 function statusLabel(s: string) {
-  return { uploaded: '待识别', extracted: '已识别', analyzed: '已分析', failed: '失败' }[s] || s
+  return (
+    {
+      uploaded: '待识别',
+      extracting: '识别中...',
+      extracted: '已识别',
+      analyzing: '分析中...',
+      analyzed: '已分析',
+      failed: '失败',
+    } as Record<string, string>
+  )[s] || s
 }
 
 function MistakeCard({

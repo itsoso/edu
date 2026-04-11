@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api'
+import { usePolling } from '../hooks/usePolling'
 
 function currentMonth(): string {
   const d = new Date()
@@ -14,12 +15,18 @@ function prevMonth(m: string): string {
   return `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}`
 }
 
+type ReportState = {
+  exists: boolean
+  status?: 'generating' | 'done' | 'failed'
+  content_md?: string
+  metrics?: any
+  error_message?: string | null
+}
+
 export default function Reports() {
   const [list, setList] = useState<{ id: number; month: string; created_at: string }[]>([])
   const [active, setActive] = useState<string>(currentMonth())
-  const [content, setContent] = useState('')
-  const [metrics, setMetrics] = useState<any>(null)
-  const [busy, setBusy] = useState('')
+  const [report, setReport] = useState<ReportState>({ exists: false })
   const [err, setErr] = useState('')
 
   async function refreshList() {
@@ -33,14 +40,16 @@ export default function Reports() {
 
   async function loadActive(m: string) {
     setErr('')
-    setContent('')
-    setMetrics(null)
+    setReport({ exists: false })
     try {
       const r = await api.getMonthlyReport(m)
-      if (r.exists) {
-        setContent(r.content_md || '')
-        setMetrics(r.metrics || null)
-      }
+      setReport({
+        exists: r.exists,
+        status: r.status,
+        content_md: r.content_md || '',
+        metrics: r.metrics || null,
+        error_message: r.error_message,
+      })
     } catch (e: any) {
       setErr(e.message || String(e))
     }
@@ -54,18 +63,41 @@ export default function Reports() {
     loadActive(active)
   }, [active])
 
+  // 状态 generating 时自动轮询
+  const isGenerating = report.exists && report.status === 'generating'
+  usePolling(
+    async () => {
+      const r = await api.getMonthlyReport(active)
+      setReport({
+        exists: r.exists,
+        status: r.status,
+        content_md: r.content_md || '',
+        metrics: r.metrics || null,
+        error_message: r.error_message,
+      })
+      if (r.status !== 'generating') {
+        refreshList()
+      }
+      return r
+    },
+    (r: any) => r?.exists && r?.status === 'generating',
+    { interval: 3000, enabled: isGenerating }
+  )
+
   async function generate(force: boolean) {
     setErr('')
-    setBusy(`AI 正在生成 ${active} 复盘报告... (20-40 秒)`)
     try {
       const r = await api.generateMonthlyReport(active, force)
-      setContent(r.content_md)
-      setMetrics(r.metrics)
+      setReport({
+        exists: true,
+        status: r.status || 'done',
+        content_md: r.content_md || '',
+        metrics: r.metrics || null,
+        error_message: r.error_message,
+      })
       await refreshList()
     } catch (e: any) {
       setErr(e.message || String(e))
-    } finally {
-      setBusy('')
     }
   }
 
@@ -73,8 +105,7 @@ export default function Reports() {
     if (!confirm(`删除 ${active} 的复盘报告?`)) return
     try {
       await api.deleteMonthlyReport(active)
-      setContent('')
-      setMetrics(null)
+      setReport({ exists: false })
       await refreshList()
     } catch (e: any) {
       setErr(e.message || String(e))
@@ -92,7 +123,8 @@ export default function Reports() {
     return arr
   }, [])
 
-  const hasReport = Boolean(content)
+  const hasDoneReport = report.exists && report.status === 'done' && !!report.content_md
+  const isFailed = report.status === 'failed'
 
   return (
     <div className="space-y-6">
@@ -130,13 +162,33 @@ export default function Reports() {
           {err}
         </div>
       )}
-      {busy && (
-        <div className="text-sm text-brand-700 bg-brand-50 border border-brand-200 rounded p-3">
-          {busy}
+
+      {isGenerating && (
+        <div className="bg-brand-50 border border-brand-200 rounded-lg p-6 text-center">
+          <div className="text-3xl mb-2 animate-pulse">⏳</div>
+          <div className="font-medium text-brand-700">
+            AI 正在生成 {active} 复盘报告...
+          </div>
+          <div className="text-xs text-slate-500 mt-1">
+            大约 20-40 秒. 你可以切到其他页面, 稍后回来看
+          </div>
         </div>
       )}
 
-      {!hasReport && !busy && (
+      {isFailed && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-5">
+          <div className="font-medium text-red-700 mb-1">生成失败</div>
+          <div className="text-sm text-slate-700">{report.error_message || '未知原因'}</div>
+          <button
+            onClick={() => generate(true)}
+            className="mt-3 px-4 py-1.5 text-sm bg-brand-600 text-white rounded"
+          >
+            🔄 重试
+          </button>
+        </div>
+      )}
+
+      {!report.exists && !isGenerating && !isFailed && (
         <div className="bg-white border border-slate-200 rounded-lg p-8 text-center">
           <div className="text-lg font-medium mb-2">{active} 还没有复盘报告</div>
           <div className="text-sm text-slate-500 mb-4">
@@ -144,20 +196,18 @@ export default function Reports() {
           </div>
           <button
             onClick={() => generate(false)}
-            disabled={!!busy}
-            className="px-5 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
+            className="px-5 py-2 bg-brand-600 text-white rounded hover:bg-brand-700"
           >
             🧠 生成 {active} 复盘
           </button>
         </div>
       )}
 
-      {hasReport && (
+      {hasDoneReport && (
         <div className="space-y-4">
           <div className="flex justify-end gap-2">
             <button
               onClick={() => generate(true)}
-              disabled={!!busy}
               className="px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-slate-50"
             >
               🔄 重新生成
@@ -170,10 +220,10 @@ export default function Reports() {
             </button>
           </div>
 
-          {metrics && <MetricsBar metrics={metrics} />}
+          {report.metrics && <MetricsBar metrics={report.metrics} />}
 
           <div className="bg-white border border-slate-200 rounded-lg p-6 md:p-8 md-content">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{report.content_md || ''}</ReactMarkdown>
           </div>
         </div>
       )}

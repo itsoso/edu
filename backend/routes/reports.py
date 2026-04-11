@@ -1,12 +1,20 @@
-"""月度复盘报告: 拉本月数据 → 喂给 LLM → 生成 Markdown."""
+"""月度复盘报告: 拉本月数据 → 喂给 LLM → 生成 Markdown.
+
+生成是异步的 (~25s). POST /reports/monthly/:m/generate 立即返回占位记录
+(status=generating, content_md=空), 前端轮询 GET /reports/monthly/:m
+直到 status=done.
+"""
 import json
+import logging
 
 from flask import Blueprint, jsonify, request, abort, g
 
 from db import db, row_to_dict, rows_to_dicts
 from auth import login_required
 from llm import get_llm, LLMError, MONTHLY_REPORT_PROMPT
+from background import submit as bg_submit
 
+logger = logging.getLogger(__name__)
 bp = Blueprint("reports", __name__)
 
 
@@ -220,33 +228,13 @@ def get_monthly_report(month):
         ).fetchone()
     if not row:
         return jsonify({"exists": False, "month": month}), 200
-    d = row_to_dict(row)
-    try:
-        d["metrics"] = json.loads(d["metrics_json"]) if d.get("metrics_json") else None
-    except Exception:
-        d["metrics"] = None
-    d.pop("metrics_json", None)
-    d["exists"] = True
-    return jsonify(d)
+    return jsonify(_report_to_dict(row))
 
 
-@bp.post("/api/reports/monthly/<month>/generate")
-@login_required
-def generate_monthly_report(month):
-    if not (len(month) == 7 and month[4] == "-"):
-        abort(400, "month must be YYYY-MM")
-    force = bool(request.json and request.json.get("force")) if request.is_json else False
-
-    with db() as conn:
-        existing = conn.execute(
-            "SELECT id FROM monthly_reports WHERE owner_user_id = ? AND month = ?",
-            (g.owner_id, month),
-        ).fetchone()
-        if existing and not force:
-            return jsonify({"error": "already_exists", "report_id": existing["id"]}), 409
-        metrics = _collect_monthly_metrics(conn, g.owner_id, month)
-
-    prompt_vars = _format_metrics_for_prompt(metrics)
+def _run_monthly_report_bg(report_id: int, metrics: dict):
+    """后台: 调 LLM 写报告, 更新 monthly_reports."""
+    from routes.reports import _format_metrics_for_prompt as _fmt  # self-import 避免循环
+    prompt_vars = _fmt(metrics)
     prompt = MONTHLY_REPORT_PROMPT.format(**prompt_vars)
     try:
         llm = get_llm()
@@ -258,37 +246,89 @@ def generate_monthly_report(month):
             temperature=0.5,
             max_tokens=2500,
         )
-    except LLMError as e:
-        return jsonify({"error": "llm_error", "detail": str(e)}), 502
+        if content_md.startswith("```"):
+            content_md = content_md.strip("`")
+            if content_md.lower().startswith("markdown"):
+                content_md = content_md[8:]
+            content_md = content_md.strip()
+        with db() as conn:
+            conn.execute(
+                """UPDATE monthly_reports
+                   SET content_md = ?, status = 'done', error_message = NULL,
+                       created_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (content_md, report_id),
+            )
+        logger.info("monthly report done for id %s", report_id)
+    except Exception as e:
+        logger.exception("monthly report failed for id %s", report_id)
+        with db() as conn:
+            conn.execute(
+                "UPDATE monthly_reports SET status='failed', error_message=? WHERE id=?",
+                (str(e)[:500], report_id),
+            )
 
-    # 去 markdown fence 如果有
-    if content_md.startswith("```"):
-        content_md = content_md.strip("`")
-        if content_md.lower().startswith("markdown"):
-            content_md = content_md[8:]
-        content_md = content_md.strip()
+
+@bp.post("/api/reports/monthly/<month>/generate")
+@login_required
+def generate_monthly_report(month):
+    """异步生成月度复盘. 立即返回占位 record (status=generating)."""
+    if not (len(month) == 7 and month[4] == "-"):
+        abort(400, "month must be YYYY-MM")
+    force = bool(request.json and request.json.get("force")) if request.is_json else False
 
     with db() as conn:
+        existing = conn.execute(
+            "SELECT id, status FROM monthly_reports WHERE owner_user_id = ? AND month = ?",
+            (g.owner_id, month),
+        ).fetchone()
+        if existing:
+            if existing["status"] == "generating":
+                # 已经在生成中, 不启动第二个
+                row = conn.execute(
+                    "SELECT * FROM monthly_reports WHERE id = ?", (existing["id"],)
+                ).fetchone()
+                return jsonify(_report_to_dict(row)), 202
+            if not force:
+                return jsonify({"error": "already_exists", "report_id": existing["id"]}), 409
+        metrics = _collect_monthly_metrics(conn, g.owner_id, month)
+        metrics_json = json.dumps(metrics, ensure_ascii=False)
+
         if existing:
             conn.execute(
                 """UPDATE monthly_reports
-                   SET content_md = ?, metrics_json = ?, created_at = CURRENT_TIMESTAMP
+                   SET status = 'generating', content_md = '',
+                       metrics_json = ?, error_message = NULL
                    WHERE id = ?""",
-                (content_md, json.dumps(metrics, ensure_ascii=False), existing["id"]),
+                (metrics_json, existing["id"]),
             )
             rid = existing["id"]
         else:
             cur = conn.execute(
-                """INSERT INTO monthly_reports (owner_user_id, month, content_md, metrics_json)
-                   VALUES (?, ?, ?, ?)""",
-                (g.owner_id, month, content_md, json.dumps(metrics, ensure_ascii=False)),
+                """INSERT INTO monthly_reports
+                   (owner_user_id, month, content_md, metrics_json, status)
+                   VALUES (?, ?, '', ?, 'generating')""",
+                (g.owner_id, month, metrics_json),
             )
             rid = cur.lastrowid
 
-    return jsonify({
-        "id": rid, "month": month,
-        "content_md": content_md, "metrics": metrics,
-    })
+        row = conn.execute("SELECT * FROM monthly_reports WHERE id = ?", (rid,)).fetchone()
+
+    bg_submit(_run_monthly_report_bg, rid, metrics)
+    return jsonify(_report_to_dict(row)), 202
+
+
+def _report_to_dict(row) -> dict:
+    d = row_to_dict(row)
+    if not d:
+        return None
+    try:
+        d["metrics"] = json.loads(d["metrics_json"]) if d.get("metrics_json") else None
+    except Exception:
+        d["metrics"] = None
+    d.pop("metrics_json", None)
+    d["exists"] = True
+    return d
 
 
 @bp.delete("/api/reports/monthly/<month>")

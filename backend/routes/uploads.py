@@ -1,5 +1,10 @@
-"""试卷上传 + LLM 抽取/分析/保存错题."""
+"""试卷上传 + LLM 抽取/分析/保存错题.
+
+LLM 抽取/分析是异步的: 接口立即返回 202, 后台线程调 LLM 并更新 DB.
+前端通过轮询 GET /api/uploads/:id 等待 status 变化 (extracting → extracted/failed).
+"""
 import json
+import logging
 import uuid
 
 from flask import Blueprint, jsonify, request, abort, g, send_from_directory
@@ -13,7 +18,9 @@ from llm import (
     _parse_json_loose,
 )
 from constants import UPLOAD_DIR, ALLOWED_IMAGE_EXT
+from background import submit as bg_submit
 
+logger = logging.getLogger(__name__)
 bp = Blueprint("uploads", __name__)
 
 
@@ -146,58 +153,97 @@ def delete_upload(upload_id):
     return {"ok": True}
 
 
-# ---------- LLM 抽取 / 分析 / 保存 ----------
-@bp.post("/api/uploads/<int:upload_id>/extract")
-@login_required
-def extract_mistakes_from_upload(upload_id):
-    """调用 vision LLM 抽取错题列表. 同步返回 JSON."""
-    with db() as conn:
-        row = _get_upload_or_403(conn, upload_id)
-    path = UPLOAD_DIR / row["file_path"]
+# ---------- LLM 抽取 / 分析 (异步) ----------
+def _run_extract_bg(upload_id: int, file_path_str: str):
+    """后台线程: 调 vision LLM 抽错题, 写回 DB.
+
+    不能碰 Flask g/session/request. 所有参数必须从请求线程拷贝.
+    """
+    path = UPLOAD_DIR / file_path_str
     try:
         llm = get_llm()
         raw = llm.vision_chat(EXTRACT_MISTAKES_PROMPT, [path], max_tokens=3500)
         data = _parse_json_loose(raw)
-    except LLMError as e:
+        subject = (data.get("subject") if isinstance(data, dict) else None) or None
+        with db() as conn:
+            conn.execute(
+                """UPDATE exam_uploads
+                   SET status='extracted', extracted_json=?,
+                       subject=COALESCE(subject, ?), error_message=NULL
+                   WHERE id=?""",
+                (json.dumps(data, ensure_ascii=False), subject, upload_id),
+            )
+        logger.info("extract done for upload %s", upload_id)
+    except Exception as e:
+        logger.exception("extract failed for upload %s", upload_id)
         with db() as conn:
             conn.execute(
                 "UPDATE exam_uploads SET status='failed', error_message=? WHERE id=?",
-                (str(e), upload_id),
+                (str(e)[:500], upload_id),
             )
-        return jsonify({"error": "llm_error", "detail": str(e)}), 502
 
-    subject = (data.get("subject") if isinstance(data, dict) else None) or None
+
+def _run_analyze_bg(upload_id: int, file_path_str: str, prev_status: str):
+    path = UPLOAD_DIR / file_path_str
+    try:
+        llm = get_llm()
+        raw = llm.vision_chat(FULL_ANALYSIS_PROMPT, [path], max_tokens=2500)
+        data = _parse_json_loose(raw)
+        # 保持 extracted 状态不丢 (如果之前已经 extracted)
+        new_status = "extracted" if prev_status == "extracted" else "analyzed"
+        # 但既然本次是 analyze, 最终统一成 analyzed 让前端知道分析已完成
+        new_status = "analyzed"
+        with db() as conn:
+            conn.execute(
+                """UPDATE exam_uploads SET analysis_json=?, status=?, error_message=NULL
+                   WHERE id=?""",
+                (json.dumps(data, ensure_ascii=False), new_status, upload_id),
+            )
+        logger.info("analyze done for upload %s", upload_id)
+    except Exception as e:
+        logger.exception("analyze failed for upload %s", upload_id)
+        with db() as conn:
+            conn.execute(
+                "UPDATE exam_uploads SET status='failed', error_message=? WHERE id=?",
+                (str(e)[:500], upload_id),
+            )
+
+
+@bp.post("/api/uploads/<int:upload_id>/extract")
+@login_required
+def extract_mistakes_from_upload(upload_id):
+    """异步启动 vision LLM 抽取. 立即返回 202 + 当前 row (status=extracting)."""
     with db() as conn:
+        row = _get_upload_or_403(conn, upload_id)
+        if row["status"] in ("extracting", "analyzing"):
+            return jsonify(_upload_to_dict(row)), 202
         conn.execute(
-            """UPDATE exam_uploads
-               SET status='extracted', extracted_json=?, subject=COALESCE(subject, ?)
-               WHERE id=?""",
-            (json.dumps(data, ensure_ascii=False), subject, upload_id),
+            "UPDATE exam_uploads SET status='extracting', error_message=NULL WHERE id=?",
+            (upload_id,),
         )
         row = conn.execute("SELECT * FROM exam_uploads WHERE id = ?", (upload_id,)).fetchone()
-    return jsonify(_upload_to_dict(row))
+    file_path_str = row["file_path"]
+    bg_submit(_run_extract_bg, upload_id, file_path_str)
+    return jsonify(_upload_to_dict(row)), 202
 
 
 @bp.post("/api/uploads/<int:upload_id>/analyze")
 @login_required
 def full_analysis_of_upload(upload_id):
+    """异步启动全卷分析. 立即返回 202 + 当前 row (status=analyzing)."""
     with db() as conn:
         row = _get_upload_or_403(conn, upload_id)
-    path = UPLOAD_DIR / row["file_path"]
-    try:
-        llm = get_llm()
-        raw = llm.vision_chat(FULL_ANALYSIS_PROMPT, [path], max_tokens=2500)
-        data = _parse_json_loose(raw)
-    except LLMError as e:
-        return jsonify({"error": "llm_error", "detail": str(e)}), 502
-
-    with db() as conn:
+        if row["status"] in ("extracting", "analyzing"):
+            return jsonify(_upload_to_dict(row)), 202
+        prev_status = row["status"] or "uploaded"
         conn.execute(
-            "UPDATE exam_uploads SET analysis_json=?, status='analyzed' WHERE id=?",
-            (json.dumps(data, ensure_ascii=False), upload_id),
+            "UPDATE exam_uploads SET status='analyzing', error_message=NULL WHERE id=?",
+            (upload_id,),
         )
         row = conn.execute("SELECT * FROM exam_uploads WHERE id = ?", (upload_id,)).fetchone()
-    return jsonify(_upload_to_dict(row))
+    file_path_str = row["file_path"]
+    bg_submit(_run_analyze_bg, upload_id, file_path_str, prev_status)
+    return jsonify(_upload_to_dict(row)), 202
 
 
 @bp.post("/api/uploads/<int:upload_id>/save-mistakes")

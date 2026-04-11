@@ -1,17 +1,22 @@
+import { lazy, Suspense } from 'react'
 import { NavLink, Route, Routes, Navigate, useLocation } from 'react-router-dom'
 import clsx from 'clsx'
 import { useAuth } from './auth'
+
+// Dashboard 作为首页保持同步加载, 保证首屏最快
 import Dashboard from './pages/Dashboard'
-import Trends from './pages/Trends'
-import Plan from './pages/Plan'
-import ErrorBook from './pages/ErrorBook'
-import Methods from './pages/Methods'
-import Analysis from './pages/Analysis'
 import Login from './pages/Login'
 import Register from './pages/Register'
-import Scan from './pages/Scan'
-import Practice from './pages/Practice'
-import Reports from './pages/Reports'
+
+// 其余页面按需加载 (Recharts / ReactMarkdown 等大依赖会被拆到独立 chunk)
+const Trends = lazy(() => import('./pages/Trends'))
+const Plan = lazy(() => import('./pages/Plan'))
+const ErrorBook = lazy(() => import('./pages/ErrorBook'))
+const Methods = lazy(() => import('./pages/Methods'))
+const Analysis = lazy(() => import('./pages/Analysis'))
+const Scan = lazy(() => import('./pages/Scan'))
+const Practice = lazy(() => import('./pages/Practice'))
+const Reports = lazy(() => import('./pages/Reports'))
 
 const navItems = [
   { to: '/', label: '今日', icon: '🏠', end: true },
@@ -54,6 +59,14 @@ function PublicOnly({ children }: { children: JSX.Element }) {
   const { user } = useAuth()
   if (user) return <Navigate to="/" replace />
   return children
+}
+
+function PageLoading() {
+  return (
+    <div className="flex items-center justify-center py-20 text-sm text-slate-400">
+      <span className="animate-pulse">加载中...</span>
+    </div>
+  )
 }
 
 function Shell() {
@@ -104,18 +117,20 @@ function Shell() {
       </aside>
 
       <main className="flex-1 p-4 md:p-8 max-w-5xl">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/trends" element={<Trends />} />
-          <Route path="/plan" element={<Plan />} />
-          <Route path="/scan" element={<Scan />} />
-          <Route path="/mistakes" element={<ErrorBook />} />
-          <Route path="/practice" element={<Practice />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/methods" element={<Methods />} />
-          <Route path="/analysis" element={<Analysis />} />
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
+        <Suspense fallback={<PageLoading />}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/trends" element={<Trends />} />
+            <Route path="/plan" element={<Plan />} />
+            <Route path="/scan" element={<Scan />} />
+            <Route path="/mistakes" element={<ErrorBook />} />
+            <Route path="/practice" element={<Practice />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/methods" element={<Methods />} />
+            <Route path="/analysis" element={<Analysis />} />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   )

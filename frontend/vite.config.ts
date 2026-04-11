@@ -14,4 +14,17 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    // 提高单 chunk 警告阈值, recharts vendor chunk 合理地会比 500kb 大
+    chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        // 只拆真正重型的可选 chunk (charts + markdown), 其他依赖留在 vendor 避免循环引用.
+        manualChunks: {
+          charts: ['recharts'],
+          markdown: ['react-markdown', 'remark-gfm'],
+        },
+      },
+    },
+  },
 })

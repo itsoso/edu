@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS practice_sets (
     title             TEXT    NOT NULL,
     subject           TEXT,
     knowledge_point   TEXT,
+    status            TEXT    DEFAULT 'done',       -- generating|done|failed
+    error_message     TEXT,
     created_at        TEXT    DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (owner_user_id)     REFERENCES users(id)     ON DELETE CASCADE,
     FOREIGN KEY (source_mistake_id) REFERENCES mistakes(id)  ON DELETE SET NULL
@@ -122,8 +124,10 @@ CREATE TABLE IF NOT EXISTS monthly_reports (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id INTEGER NOT NULL,
     month         TEXT    NOT NULL,                 -- YYYY-MM
-    content_md    TEXT    NOT NULL,                 -- Markdown 报告正文
+    content_md    TEXT    NOT NULL DEFAULT '',     -- Markdown 报告正文 (生成中为空)
     metrics_json  TEXT,                             -- 原始指标, 便于前端二次渲染
+    status        TEXT    DEFAULT 'done',          -- generating|done|failed
+    error_message TEXT,
     created_at    TEXT    DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(owner_user_id, month),
     FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -177,10 +181,30 @@ def db():
         conn.close()
 
 
+def _column_exists(conn, table: str, col: str) -> bool:
+    cur = conn.execute(f"PRAGMA table_info({table})")
+    return any(r[1] == col for r in cur.fetchall())
+
+
+def _run_migrations(conn):
+    """轻量 migration: 给已有表加新列. PRAGMA table_info 检查过后再 ALTER, 幂等."""
+    # practice_sets.status / error_message
+    if not _column_exists(conn, "practice_sets", "status"):
+        conn.execute("ALTER TABLE practice_sets ADD COLUMN status TEXT DEFAULT 'done'")
+    if not _column_exists(conn, "practice_sets", "error_message"):
+        conn.execute("ALTER TABLE practice_sets ADD COLUMN error_message TEXT")
+    # monthly_reports.status / error_message / content_md default
+    if not _column_exists(conn, "monthly_reports", "status"):
+        conn.execute("ALTER TABLE monthly_reports ADD COLUMN status TEXT DEFAULT 'done'")
+    if not _column_exists(conn, "monthly_reports", "error_message"):
+        conn.execute("ALTER TABLE monthly_reports ADD COLUMN error_message TEXT")
+
+
 def init_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with db() as conn:
         conn.executescript(SCHEMA)
+        _run_migrations(conn)
 
 
 def row_to_dict(row):

@@ -1,4 +1,11 @@
-"""二次训练: 出题 + 作答 + 批改."""
+"""二次训练: 出题 + 作答 + 批改.
+
+出题是异步的 (20 秒级别): 立即创建占位 set (status=generating),
+后台填 items, 前端轮询 GET /api/practice/:id 直到 status=done.
+单题批改依然同步 (5 秒, 不是痛点).
+"""
+import logging
+
 from flask import Blueprint, jsonify, request, abort, g
 
 from db import db, row_to_dict, rows_to_dicts
@@ -8,7 +15,9 @@ from llm import (
     GENERATE_PRACTICE_PROMPT, GRADE_PRACTICE_PROMPT,
     _parse_json_loose,
 )
+from background import submit as bg_submit
 
+logger = logging.getLogger(__name__)
 bp = Blueprint("practice", __name__)
 
 
@@ -47,26 +56,16 @@ def get_practice_set(set_id):
         return jsonify(_set_to_dict(conn, row))
 
 
-@bp.post("/api/mistakes/<int:mid>/generate-practice")
-@login_required
-def generate_practice_from_mistake(mid):
-    payload = request.get_json(force=True) or {}
-    count = max(1, min(int(payload.get("count", 3)), 6))
-
-    with db() as conn:
-        mrow = conn.execute(
-            "SELECT * FROM mistakes WHERE id = ? AND owner_user_id = ?",
-            (mid, g.owner_id),
-        ).fetchone()
-    if not mrow:
-        abort(404)
-
+def _run_generate_practice_bg(
+    set_id: int, mistake_snapshot: dict, count: int
+):
+    """后台: 调 LLM 出题, 写入 practice_items, 把 set 状态改成 done."""
     prompt = GENERATE_PRACTICE_PROMPT.format(
         count=count,
-        subject=mrow["subject"] or "",
-        knowledge_point=mrow["knowledge_point"] or "待定",
-        question_text=mrow["question_text"] or "(无)",
-        reason=mrow["reason"] or "",
+        subject=mistake_snapshot["subject"] or "",
+        knowledge_point=mistake_snapshot["knowledge_point"] or "待定",
+        question_text=mistake_snapshot["question_text"] or "(无)",
+        reason=mistake_snapshot["reason"] or "",
     )
     try:
         llm = get_llm()
@@ -76,17 +75,57 @@ def generate_practice_from_mistake(mid):
             temperature=0.4, max_tokens=2500, response_format_json=True,
         )
         data = _parse_json_loose(raw)
-    except LLMError as e:
-        return jsonify({"error": "llm_error", "detail": str(e)}), 502
+        items = data.get("items") if isinstance(data, dict) else None
+        if not items:
+            raise ValueError(f"no_items_in_response: {str(raw)[:200]}")
 
-    items = data.get("items") if isinstance(data, dict) else None
-    if not items:
-        return jsonify({"error": "no_items", "raw": raw[:200] if isinstance(raw, str) else ""}), 502
+        with db() as conn:
+            for it in items:
+                conn.execute(
+                    """INSERT INTO practice_items
+                       (set_id, question_text, expected_answer, solution_steps, difficulty)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (
+                        set_id,
+                        it.get("question_text", ""),
+                        it.get("expected_answer"),
+                        it.get("solution_steps"),
+                        it.get("difficulty"),
+                    ),
+                )
+            conn.execute(
+                "UPDATE practice_sets SET status='done', error_message=NULL WHERE id=?",
+                (set_id,),
+            )
+        logger.info("generate practice done for set %s", set_id)
+    except Exception as e:
+        logger.exception("generate practice failed for set %s", set_id)
+        with db() as conn:
+            conn.execute(
+                "UPDATE practice_sets SET status='failed', error_message=? WHERE id=?",
+                (str(e)[:500], set_id),
+            )
+
+
+@bp.post("/api/mistakes/<int:mid>/generate-practice")
+@login_required
+def generate_practice_from_mistake(mid):
+    """异步创建训练题集. 立即返回占位 set (status=generating) + 空 items."""
+    payload = request.get_json(force=True) or {}
+    count = max(1, min(int(payload.get("count", 3)), 6))
 
     with db() as conn:
+        mrow = conn.execute(
+            "SELECT * FROM mistakes WHERE id = ? AND owner_user_id = ?",
+            (mid, g.owner_id),
+        ).fetchone()
+        if not mrow:
+            abort(404)
+
         cur = conn.execute(
-            """INSERT INTO practice_sets (owner_user_id, source_mistake_id, title, subject, knowledge_point)
-               VALUES (?, ?, ?, ?, ?)""",
+            """INSERT INTO practice_sets
+               (owner_user_id, source_mistake_id, title, subject, knowledge_point, status)
+               VALUES (?, ?, ?, ?, ?, 'generating')""",
             (
                 g.owner_id,
                 mid,
@@ -96,21 +135,18 @@ def generate_practice_from_mistake(mid):
             ),
         )
         set_id = cur.lastrowid
-        for it in items:
-            conn.execute(
-                """INSERT INTO practice_items
-                   (set_id, question_text, expected_answer, solution_steps, difficulty)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (
-                    set_id,
-                    it.get("question_text", ""),
-                    it.get("expected_answer"),
-                    it.get("solution_steps"),
-                    it.get("difficulty"),
-                ),
-            )
+        # 从请求线程拷贝参数, 后台线程不能碰 g
+        mistake_snapshot = {
+            "subject": mrow["subject"],
+            "knowledge_point": mrow["knowledge_point"],
+            "question_text": mrow["question_text"],
+            "reason": mrow["reason"],
+        }
         row = conn.execute("SELECT * FROM practice_sets WHERE id = ?", (set_id,)).fetchone()
-        return jsonify(_set_to_dict(conn, row))
+        resp = _set_to_dict(conn, row)
+
+    bg_submit(_run_generate_practice_bg, set_id, mistake_snapshot, count)
+    return jsonify(resp), 202
 
 
 @bp.post("/api/practice/items/<int:item_id>/grade")

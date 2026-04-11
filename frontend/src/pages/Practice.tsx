@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, PracticeSet, PracticeItem } from '../api'
+import { usePolling } from '../hooks/usePolling'
 
 export default function Practice() {
   const [sets, setSets] = useState<PracticeSet[]>([])
@@ -13,6 +14,9 @@ export default function Practice() {
       if (active) {
         const u = data.find((x) => x.id === active.id)
         if (u) setActive(u)
+      } else if (data.length > 0) {
+        // 如果还没选中任何题集, 默认选第一个 (最新的)
+        setActive(data[0])
       }
     } catch (e: any) {
       setErr(e.message || String(e))
@@ -22,6 +26,23 @@ export default function Practice() {
   useEffect(() => {
     reload()
   }, [])
+
+  // 当 active set 正在生成中时轮询
+  const isGenerating = active?.status === 'generating'
+  usePolling(
+    async () => {
+      if (!active) return null
+      const s = await api.getPracticeSet(active.id)
+      setActive(s)
+      // 完成后刷一下 list 让侧栏也更新
+      if (s.status !== 'generating') {
+        api.listPracticeSets().then(setSets).catch(() => {})
+      }
+      return s
+    },
+    (s: any) => !!s && s.status === 'generating',
+    { interval: 2500, enabled: !!active && isGenerating }
+  )
 
   async function remove(id: number) {
     if (!confirm('删除这份训练题？已作答的记录将一并删除')) return
@@ -53,6 +74,8 @@ export default function Practice() {
               {sets.map((s) => {
                 const done = s.items.filter((i) => i.is_correct !== null).length
                 const correct = s.items.filter((i) => i.is_correct === 1).length
+                const gen = s.status === 'generating'
+                const failed = s.status === 'failed'
                 return (
                   <li key={s.id}>
                     <button
@@ -61,9 +84,17 @@ export default function Practice() {
                         active?.id === s.id ? 'bg-brand-50 border border-brand-200' : ''
                       }`}
                     >
-                      <div className="font-medium truncate">{s.title}</div>
+                      <div className="font-medium truncate flex items-center gap-1">
+                        {gen && <span className="animate-pulse">⏳</span>}
+                        {failed && <span>⚠️</span>}
+                        <span className="truncate">{s.title}</span>
+                      </div>
                       <div className="text-xs text-slate-500 mt-0.5">
-                        {s.items.length} 题 · 已做 {done} · 对 {correct}
+                        {gen
+                          ? 'AI 出题中...'
+                          : failed
+                          ? '生成失败'
+                          : `${s.items.length} 题 · 已做 ${done} · 对 ${correct}`}
                       </div>
                     </button>
                   </li>
@@ -95,16 +126,36 @@ export default function Practice() {
                 </button>
               </div>
 
-              {active.items.map((it, idx) => (
-                <ItemCard
-                  key={it.id}
-                  index={idx}
-                  item={it}
-                  onGraded={async () => {
-                    await reload()
-                  }}
-                />
-              ))}
+              {active.status === 'generating' && (
+                <div className="bg-brand-50 border border-brand-200 rounded-lg p-6 text-center">
+                  <div className="text-3xl mb-2 animate-pulse">⏳</div>
+                  <div className="font-medium text-brand-700">AI 正在基于你的错题出题...</div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    大约 15-25 秒. 你可以切到其他页面, 稍后回来看
+                  </div>
+                </div>
+              )}
+
+              {active.status === 'failed' && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+                  生成失败: {active.error_message || '未知原因'}
+                  <div className="mt-2 text-xs text-slate-500">
+                    请回到错题本重新点"生成类题"
+                  </div>
+                </div>
+              )}
+
+              {active.status !== 'generating' &&
+                active.items.map((it, idx) => (
+                  <ItemCard
+                    key={it.id}
+                    index={idx}
+                    item={it}
+                    onGraded={async () => {
+                      await reload()
+                    }}
+                  />
+                ))}
             </>
           )}
         </section>
