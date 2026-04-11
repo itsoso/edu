@@ -13,7 +13,7 @@ from auth import login_required
 from llm import (
     get_llm, LLMError,
     GENERATE_PRACTICE_PROMPT, GRADE_PRACTICE_PROMPT,
-    _parse_json_loose,
+    parse_json_or_retry,
 )
 from background import submit as bg_submit
 
@@ -74,7 +74,7 @@ def _run_generate_practice_bg(
              {"role": "user", "content": prompt}],
             temperature=0.4, max_tokens=2500, response_format_json=True,
         )
-        data = _parse_json_loose(raw)
+        data = parse_json_or_retry(llm, raw)
         items = data.get("items") if isinstance(data, dict) else None
         if not items:
             raise ValueError(f"no_items_in_response: {str(raw)[:200]}")
@@ -181,7 +181,7 @@ def grade_practice_item(item_id):
              {"role": "user", "content": prompt}],
             temperature=0.1, max_tokens=600, response_format_json=True,
         )
-        data = _parse_json_loose(raw)
+        data = parse_json_or_retry(llm, raw)
     except LLMError as e:
         return jsonify({"error": "llm_error", "detail": str(e)}), 502
 

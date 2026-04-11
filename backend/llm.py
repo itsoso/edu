@@ -127,7 +127,10 @@ class LLMClient:
 
 
 def _parse_json_loose(raw: str) -> Any:
-    """LLM 往往把 JSON 包进 markdown. 多级 fallback."""
+    """LLM 往往把 JSON 包进 markdown. 多级 fallback.
+
+    失败时抛 LLMError, 让调用方决定要不要走二次清洗.
+    """
     s = raw.strip()
     # 1. 直接解析
     try:
@@ -161,6 +164,43 @@ def _parse_json_loose(raw: str) -> Any:
         except json.JSONDecodeError:
             pass
     raise LLMError(f"could not parse JSON from LLM response: {raw[:200]}")
+
+
+def parse_json_or_retry(client: "LLMClient", raw: str, max_retries: int = 1) -> Any:
+    """解析 LLM 输出为 JSON. 第一次失败就回投给 LLM 让它清洗一遍.
+
+    为什么值得做: _parse_json_loose 的 4 级 fallback 都是纯文本启发式,
+    偶尔 LLM 会吐出 "这是 JSON: ..." 带前言, 或中英文混杂的标点导致 4 级都失败.
+    二次清洗的成功率很高, 因为只需要 LLM 复制粘贴已经存在的数据.
+
+    max_retries=1 就够用了, 再多调一次就成本过高.
+    """
+    # 第一次尝试本地解析
+    try:
+        return _parse_json_loose(raw)
+    except LLMError:
+        pass
+
+    # 本地解析失败, 让 LLM 自己清洗一次
+    for attempt in range(max_retries):
+        cleanup_prompt = (
+            "下面这段文本里含有 JSON 数据, 但混入了其他内容 (说明文字、代码块标记、中文标点等). "
+            "请提取出**完整的 JSON**, 只返回纯 JSON, 不要任何前缀/后缀/说明/代码块.\n\n"
+            f"原文本:\n{raw[:4000]}"
+        )
+        try:
+            cleaned = client.chat(
+                [{"role": "user", "content": cleanup_prompt}],
+                temperature=0.0,  # 确定性输出
+                max_tokens=3000,
+                response_format_json=True,
+            )
+            return _parse_json_loose(cleaned)
+        except LLMError:
+            continue
+
+    # 二次清洗还是不行, 抛最终错误
+    raise LLMError(f"could not parse JSON after {max_retries} retries. raw={raw[:200]}")
 
 
 # 单例

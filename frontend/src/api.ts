@@ -184,6 +184,11 @@ export const api = {
     request<{ user: User | null; bound_student?: { id: number; display_name: string; stage: string | null } }>(
       '/auth/me'
     ),
+  deleteMe: (password: string) =>
+    request<{ ok: boolean }>('/auth/me', {
+      method: 'DELETE',
+      body: JSON.stringify({ password }),
+    }),
 
   // Exams
   listExams: () => request<Exam[]>('/exams'),
@@ -212,6 +217,24 @@ export const api = {
     if (subject) qs.set('subject', subject)
     if (mastered !== undefined) qs.set('mastered', String(mastered))
     return request<Mistake[]>(`/mistakes${qs.toString() ? '?' + qs : ''}`)
+  },
+  /** 分页版. 返回 { items, total }. */
+  listMistakesPaged: async (params: {
+    subject?: string
+    mastered?: 0 | 1
+    limit?: number
+    offset?: number
+  }) => {
+    const qs = new URLSearchParams()
+    if (params.subject) qs.set('subject', params.subject)
+    if (params.mastered !== undefined) qs.set('mastered', String(params.mastered))
+    qs.set('limit', String(params.limit ?? 50))
+    qs.set('offset', String(params.offset ?? 0))
+    const res = await fetch(`/api/mistakes?${qs}`, { credentials: 'include' })
+    if (!res.ok) throw new ApiError(res.status, await res.text())
+    const items: Mistake[] = await res.json()
+    const total = parseInt(res.headers.get('X-Total-Count') || '0', 10)
+    return { items, total }
   },
   createMistake: (data: any) =>
     request<{ id: number }>('/mistakes', { method: 'POST', body: JSON.stringify(data) }),

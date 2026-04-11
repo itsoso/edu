@@ -1,10 +1,10 @@
 """Auth + health check endpoints."""
-from flask import Blueprint, jsonify, request, abort, session
+from flask import Blueprint, jsonify, request, abort, session, g
 
 from db import db
 from auth import (
     authenticate, create_student, create_parent,
-    load_current_user, public_user,
+    load_current_user, public_user, login_required,
 )
 from plan_template import install_plan_for_student
 
@@ -65,6 +65,28 @@ def login():
 
 @bp.post("/api/auth/logout")
 def logout():
+    session.clear()
+    return {"ok": True}
+
+
+@bp.delete("/api/auth/me")
+@login_required
+def delete_me():
+    """删除当前账号 + 级联删除所有数据.
+
+    要求在 body 里附带 {"password": "当前密码"} 二次确认.
+    学生账号被删后, 绑定它的家长账号变成孤立 (student_id → NULL).
+    """
+    data = request.get_json(force=True) or {}
+    password = data.get("password") or ""
+    username = g.current_user["username"]
+
+    with db() as conn:
+        user = authenticate(conn, username, password)
+        if not user or user["id"] != g.current_user["id"]:
+            return jsonify({"error": "wrong_password"}), 401
+        conn.execute("DELETE FROM users WHERE id = ?", (user["id"],))
+
     session.clear()
     return {"ok": True}
 

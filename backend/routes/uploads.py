@@ -15,7 +15,7 @@ from auth import login_required
 from llm import (
     get_llm, LLMError,
     EXTRACT_MISTAKES_PROMPT, FULL_ANALYSIS_PROMPT,
-    _parse_json_loose,
+    parse_json_or_retry,
 )
 from constants import UPLOAD_DIR, ALLOWED_IMAGE_EXT
 from background import submit as bg_submit
@@ -163,7 +163,7 @@ def _run_extract_bg(upload_id: int, file_path_str: str):
     try:
         llm = get_llm()
         raw = llm.vision_chat(EXTRACT_MISTAKES_PROMPT, [path], max_tokens=3500)
-        data = _parse_json_loose(raw)
+        data = parse_json_or_retry(llm, raw)
         subject = (data.get("subject") if isinstance(data, dict) else None) or None
         with db() as conn:
             conn.execute(
@@ -188,7 +188,7 @@ def _run_analyze_bg(upload_id: int, file_path_str: str, prev_status: str):
     try:
         llm = get_llm()
         raw = llm.vision_chat(FULL_ANALYSIS_PROMPT, [path], max_tokens=2500)
-        data = _parse_json_loose(raw)
+        data = parse_json_or_retry(llm, raw)
         # 保持 extracted 状态不丢 (如果之前已经 extracted)
         new_status = "extracted" if prev_status == "extracted" else "analyzed"
         # 但既然本次是 analyze, 最终统一成 analyzed 让前端知道分析已完成

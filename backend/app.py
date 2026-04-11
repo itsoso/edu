@@ -15,6 +15,7 @@ from flask_cors import CORS
 from db import init_db
 from auth import get_secret_key
 from constants import MAX_UPLOAD_BYTES
+from cleanup import start_cleanup_daemon
 
 from routes.auth_routes import bp as auth_bp
 from routes.exams import bp as exams_bp
@@ -53,6 +54,9 @@ def create_app() -> Flask:
     for bp in (auth_bp, exams_bp, tasks_bp, mistakes_bp,
                uploads_bp, practice_bp, reports_bp, content_bp):
         app.register_blueprint(bp)
+
+    # 启动后台清理 daemon (30 天前的试卷原图). 幂等, 多 worker 每个进程自己起.
+    start_cleanup_daemon()
 
     return app
 

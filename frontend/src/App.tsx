@@ -17,6 +17,7 @@ const Analysis = lazy(() => import('./pages/Analysis'))
 const Scan = lazy(() => import('./pages/Scan'))
 const Practice = lazy(() => import('./pages/Practice'))
 const Reports = lazy(() => import('./pages/Reports'))
+const Settings = lazy(() => import('./pages/Settings'))
 
 const navItems = [
   { to: '/', label: '今日', icon: '🏠', end: true },
@@ -28,6 +29,7 @@ const navItems = [
   { to: '/reports', label: '月度复盘', icon: '🧠' },
   { to: '/methods', label: '方法卡', icon: '🎯' },
   { to: '/analysis', label: '分析', icon: '📄' },
+  { to: '/settings', label: '设置', icon: '⚙️' },
 ]
 
 export default function App() {
@@ -128,6 +130,7 @@ function Shell() {
             <Route path="/reports" element={<Reports />} />
             <Route path="/methods" element={<Methods />} />
             <Route path="/analysis" element={<Analysis />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </Suspense>

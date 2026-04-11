@@ -25,9 +25,13 @@ const empty: Form = {
   knowledge_point: '',
 }
 
+const PAGE_SIZE = 50
+
 export default function ErrorBook() {
   const nav = useNavigate()
   const [mistakes, setMistakes] = useState<Mistake[]>([])
+  const [total, setTotal] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [stats, setStats] = useState<{ by_reason: any[]; by_subject: any[] }>({ by_reason: [], by_subject: [] })
   const [filterSubject, setFilterSubject] = useState<string>('')
   const [filterStatus, setFilterStatus] = useState<'' | '0' | '1'>('')
@@ -36,12 +40,34 @@ export default function ErrorBook() {
   const [generatingId, setGeneratingId] = useState<number | null>(null)
 
   async function reload() {
-    const [list, st] = await Promise.all([
-      api.listMistakes(filterSubject || undefined, filterStatus === '' ? undefined : (Number(filterStatus) as 0 | 1)),
+    const [pageResult, st] = await Promise.all([
+      api.listMistakesPaged({
+        subject: filterSubject || undefined,
+        mastered: filterStatus === '' ? undefined : (Number(filterStatus) as 0 | 1),
+        limit: PAGE_SIZE,
+        offset: 0,
+      }),
       api.mistakeStats(),
     ])
-    setMistakes(list)
+    setMistakes(pageResult.items)
+    setTotal(pageResult.total)
     setStats(st)
+  }
+
+  async function loadMore() {
+    setLoadingMore(true)
+    try {
+      const result = await api.listMistakesPaged({
+        subject: filterSubject || undefined,
+        mastered: filterStatus === '' ? undefined : (Number(filterStatus) as 0 | 1),
+        limit: PAGE_SIZE,
+        offset: mistakes.length,
+      })
+      setMistakes((prev) => [...prev, ...result.items])
+      setTotal(result.total)
+    } finally {
+      setLoadingMore(false)
+    }
   }
 
   useEffect(() => {
@@ -247,6 +273,11 @@ export default function ErrorBook() {
 
       {/* 列表 */}
       <div className="space-y-3">
+        {total > 0 && (
+          <div className="text-xs text-slate-500">
+            共 {total} 道错题 · 当前显示 {mistakes.length}
+          </div>
+        )}
         {mistakes.length === 0 ? (
           <p className="text-slate-400 text-sm">还没有错题记录</p>
         ) : (
@@ -314,6 +345,15 @@ export default function ErrorBook() {
               </div>
             </div>
           ))
+        )}
+        {mistakes.length < total && (
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="w-full py-2 border border-slate-200 rounded text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {loadingMore ? '加载中...' : `加载更多 (还有 ${total - mistakes.length} 道)`}
+          </button>
         )}
       </div>
     </div>

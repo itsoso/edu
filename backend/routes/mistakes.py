@@ -10,20 +10,48 @@ bp = Blueprint("mistakes", __name__)
 @bp.get("/api/mistakes")
 @login_required
 def list_mistakes():
+    """
+    Query params:
+    - subject / mastered: 过滤
+    - limit: 默认 50, 最多 200
+    - offset: 默认 0
+
+    响应向后兼容: 仍然返回一个数组, 额外通过响应头 X-Total-Count 给总数.
+    (前端老代码直接用数组也不会崩, 新代码可读头加"加载更多".)
+    """
     subject = request.args.get("subject")
     mastered = request.args.get("mastered")
-    query = "SELECT * FROM mistakes WHERE owner_user_id = ?"
-    args = [g.owner_id]
+
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        limit, offset = 50, 0
+
+    where = ["owner_user_id = ?"]
+    args: list = [g.owner_id]
     if subject:
-        query += " AND subject = ?"
+        where.append("subject = ?")
         args.append(subject)
     if mastered is not None:
-        query += " AND mastered = ?"
+        where.append("mastered = ?")
         args.append(int(mastered))
-    query += " ORDER BY created_at DESC"
+    where_sql = " AND ".join(where)
+
     with db() as conn:
-        rows = conn.execute(query, args).fetchall()
-    return jsonify(rows_to_dicts(rows))
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM mistakes WHERE {where_sql}", args
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT * FROM mistakes WHERE {where_sql} "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            args + [limit, offset],
+        ).fetchall()
+
+    resp = jsonify(rows_to_dicts(rows))
+    resp.headers["X-Total-Count"] = str(total)
+    resp.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return resp
 
 
 @bp.post("/api/mistakes")
