@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, Exam, Task, Checkin } from '../api'
+import { useAuth } from '../auth'
 
 function todayStr() {
   const d = new Date()
@@ -15,6 +16,7 @@ function dowFromDate(d: Date) {
 }
 
 export default function Dashboard() {
+  const { user, boundStudent } = useAuth()
   const [exams, setExams] = useState<Exam[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [checkins, setCheckins] = useState<Checkin[]>([])
@@ -22,6 +24,8 @@ export default function Dashboard() {
 
   const today = todayStr()
   const dow = dowFromDate(new Date())
+  const isParent = user?.role === 'parent'
+  const displayName = isParent ? boundStudent?.display_name : user?.display_name
 
   useEffect(() => {
     api.listExams().then(setExams)
@@ -65,9 +69,28 @@ export default function Dashboard() {
       <div>
         <h1 className="text-2xl font-bold">今日 · {today}</h1>
         <p className="text-slate-500 mt-1">
-          立言，今天是 <span className="font-semibold text-brand-700">第 {week} 周 · 周{'一二三四五六日'[dow - 1]}</span>
+          {isParent ? (
+            <>正在查看 <span className="font-semibold text-brand-700">{displayName}</span> 的学习进度</>
+          ) : (
+            <>{displayName}，今天是 <span className="font-semibold text-brand-700">第 {week} 周 · 周{'一二三四五六日'[dow - 1]}</span></>
+          )}
         </p>
       </div>
+
+      {/* 学生显示自己的 join_code, 家长扫码绑定用 */}
+      {user?.role === 'student' && user.join_code && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-center gap-3">
+          <span className="text-lg">👨‍👩‍👧</span>
+          <div className="flex-1 text-sm">
+            <div className="text-slate-700">
+              让家长注册账号时输入你的绑定码：
+            </div>
+            <div className="font-mono text-xl font-bold text-amber-700 tracking-widest mt-1">
+              {user.join_code}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 成绩卡片 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

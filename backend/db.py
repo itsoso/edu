@@ -1,4 +1,4 @@
-"""SQLite schema + helpers for the 教育模块."""
+"""SQLite schema + helpers — 多租户版本."""
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
@@ -6,43 +6,64 @@ from contextlib import contextmanager
 DB_PATH = Path(__file__).parent / "data" / "edu.db"
 
 SCHEMA = """
+-- 用户表: 学生 和 家长
+CREATE TABLE IF NOT EXISTS users (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    username       TEXT    UNIQUE NOT NULL,        -- 登录名
+    password_hash  TEXT    NOT NULL,
+    display_name   TEXT    NOT NULL,               -- 显示名称
+    role           TEXT    NOT NULL,               -- 'student' | 'parent'
+    student_id     INTEGER,                        -- role=parent 时指向学生 user.id
+    join_code      TEXT    UNIQUE,                 -- role=student 时有值, 家长注册时凭此绑定
+    stage          TEXT,                           -- 学生当前阶段 (初二下等)
+    settings_json  TEXT,                           -- 学生个性化设置 (满分/科目)
+    created_at     TEXT    DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- 考试记录: owner 始终是学生 user.id
 CREATE TABLE IF NOT EXISTS exams (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    exam_name    TEXT    NOT NULL,
-    exam_date    TEXT,                       -- YYYY-MM-DD (可空)
-    stage        TEXT,                       -- 初一上/初一下/初二上/初二下
-    total        REAL,
-    class_rank   INTEGER,
-    grade_rank   INTEGER,
-    notes        TEXT,
-    sort_order   INTEGER DEFAULT 0,          -- 用于按时间顺序展示
-    created_at   TEXT DEFAULT CURRENT_TIMESTAMP
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id  INTEGER NOT NULL,
+    exam_name      TEXT    NOT NULL,
+    exam_date      TEXT,
+    stage          TEXT,
+    total          REAL,
+    class_rank     INTEGER,
+    grade_rank     INTEGER,
+    notes          TEXT,
+    sort_order     INTEGER DEFAULT 0,
+    created_at     TEXT    DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS scores (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     exam_id   INTEGER NOT NULL,
-    subject   TEXT    NOT NULL,              -- 科学/英语/数学/语文/社会
+    subject   TEXT    NOT NULL,
     score     REAL    NOT NULL,
     full_mark REAL,
     FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
 );
 
+-- 任务: 每个学生有自己的一份计划(可编辑)
 CREATE TABLE IF NOT EXISTS tasks (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    week         INTEGER NOT NULL,            -- 1~4
-    day_of_week  INTEGER NOT NULL,            -- 1~7 (周一~周日)
-    subject      TEXT,                        -- 可空
-    title        TEXT    NOT NULL,
-    description  TEXT,
-    minutes      INTEGER DEFAULT 15,
-    priority     INTEGER DEFAULT 0
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id  INTEGER NOT NULL,
+    week           INTEGER NOT NULL,
+    day_of_week    INTEGER NOT NULL,
+    subject        TEXT,
+    title          TEXT    NOT NULL,
+    description    TEXT,
+    minutes        INTEGER DEFAULT 15,
+    priority       INTEGER DEFAULT 0,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS checkins (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id          INTEGER NOT NULL,
-    checkin_date     TEXT    NOT NULL,        -- YYYY-MM-DD
+    checkin_date     TEXT    NOT NULL,
     completed        INTEGER DEFAULT 1,
     duration_minutes INTEGER,
     note             TEXT,
@@ -53,23 +74,28 @@ CREATE TABLE IF NOT EXISTS checkins (
 
 CREATE TABLE IF NOT EXISTS mistakes (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    subject          TEXT    NOT NULL,        -- 科学/英语/数学/语文/社会
-    exam_name        TEXT,                    -- 来自哪次考试/作业
+    owner_user_id    INTEGER NOT NULL,
+    subject          TEXT    NOT NULL,
+    exam_name        TEXT,
     question_text    TEXT,
     wrong_answer     TEXT,
     correct_answer   TEXT,
-    reason           TEXT    NOT NULL,        -- 计算错/审题漏/不会做/步骤乱/知识遗忘/其他
+    reason           TEXT    NOT NULL,
     knowledge_point  TEXT,
     mastered         INTEGER DEFAULT 0,
-    created_at       TEXT DEFAULT CURRENT_TIMESTAMP,
-    mastered_at      TEXT
+    created_at       TEXT    DEFAULT CURRENT_TIMESTAMP,
+    mastered_at      TEXT,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_scores_exam ON scores(exam_id);
-CREATE INDEX IF NOT EXISTS idx_scores_subject ON scores(subject);
-CREATE INDEX IF NOT EXISTS idx_checkins_date ON checkins(checkin_date);
-CREATE INDEX IF NOT EXISTS idx_tasks_week ON tasks(week, day_of_week);
-CREATE INDEX IF NOT EXISTS idx_mistakes_subject ON mistakes(subject);
+CREATE INDEX IF NOT EXISTS idx_exams_owner    ON exams(owner_user_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_scores_exam    ON scores(exam_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_owner    ON tasks(owner_user_id, week, day_of_week);
+CREATE INDEX IF NOT EXISTS idx_checkins_task  ON checkins(task_id, checkin_date);
+CREATE INDEX IF NOT EXISTS idx_checkins_date  ON checkins(checkin_date);
+CREATE INDEX IF NOT EXISTS idx_mistakes_owner ON mistakes(owner_user_id, subject);
+CREATE INDEX IF NOT EXISTS idx_users_student  ON users(student_id);
+CREATE INDEX IF NOT EXISTS idx_users_code     ON users(join_code);
 """
 
 
