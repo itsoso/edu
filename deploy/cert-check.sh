@@ -14,6 +14,14 @@
 
 set -u
 
+# 用 flock 防止多实例并发调 certbot (会踩 certbot 自己的 lock)
+LOCK=/var/lock/edu-cert-check.lock
+exec 9> "$LOCK"
+if ! flock -n 9; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] skipped: another cert-check running" >> /var/log/edu/cert-check.log
+    exit 0
+fi
+
 DOMAIN=${EDU_DOMAIN:-edu.executor.life}
 LOG=/var/log/edu/cert-check.log
 ALERTS=/var/log/edu/cert-alerts.log
