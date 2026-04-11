@@ -151,8 +151,20 @@ export default function Practice() {
                     key={it.id}
                     index={idx}
                     item={it}
-                    onGraded={async () => {
-                      await reload()
+                    onGraded={(updated) => {
+                      // 局部更新: 只替换这一条 item, 不重拉全集
+                      setActive((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              items: prev.items.map((x) =>
+                                x.id === updated.id ? updated : x
+                              ),
+                            }
+                          : prev
+                      )
+                      // 同步侧栏的 done/correct 计数 (轻量刷一次 list)
+                      api.listPracticeSets().then(setSets).catch(() => {})
                     }}
                   />
                 ))}
@@ -166,7 +178,7 @@ export default function Practice() {
 
 function ItemCard({
   index, item, onGraded,
-}: { index: number; item: PracticeItem; onGraded: () => void }) {
+}: { index: number; item: PracticeItem; onGraded: (updated: PracticeItem) => void }) {
   const [answer, setAnswer] = useState(item.student_answer || '')
   const [showSolution, setShowSolution] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -181,8 +193,8 @@ function ItemCard({
     setBusy(true)
     setErr('')
     try {
-      await api.gradePracticeItem(item.id, answer.trim())
-      onGraded()
+      const updated = await api.gradePracticeItem(item.id, answer.trim())
+      onGraded(updated)
     } catch (e: any) {
       setErr(e.message || String(e))
     } finally {
