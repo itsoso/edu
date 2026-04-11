@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# 本地 → 服务器 一键部署脚本 (rsync + remote build)
+#
+# 用法: ./deploy/push.sh
+#
+# 做什么:
+#   1. rsync 源码到 /opt/edu/ (排除 node_modules / venv / DB / dist)
+#   2. 服务器上 pip install (差量)
+#   3. 服务器上 npm run build
+#   4. restart edu-backend systemd 服务
+#   5. 远程健康检查 + HTTPS 登录自检
+#
+# 安全: 不会碰 backend/data/edu.db 和 .secret_key
+
+set -euo pipefail
+
+SERVER_HOST=${EDU_SERVER_HOST:-47.237.191.17}
+SERVER_PORT=${EDU_SERVER_PORT:-22222}
+SERVER_USER=${EDU_SERVER_USER:-root}
+REMOTE_DIR=${EDU_REMOTE_DIR:-/opt/edu}
+DOMAIN=${EDU_DOMAIN:-edu.executor.life}
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+LOCAL_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+
+SSH="ssh -p $SERVER_PORT $SERVER_USER@$SERVER_HOST"
+REMOTE="$SERVER_USER@$SERVER_HOST:$REMOTE_DIR/"
+
+color() { printf '\033[%sm%s\033[0m\n' "$1" "$2"; }
+step()  { color '1;36' "==> $*"; }
+ok()    { color '1;32' "✓ $*"; }
+fail()  { color '1;31' "✗ $*"; exit 1; }
+
+# ---------------------------------------------------------------
+step "1/5 rsync  $LOCAL_DIR  →  $REMOTE"
+rsync -az --delete \
+    --exclude='node_modules' \
+    --exclude='venv' \
+    --exclude='backend/data/*.db' \
+    --exclude='backend/data/*.db-journal' \
+    --exclude='backend/data/.secret_key' \
+    --exclude='__pycache__' \
+    --exclude='*.pyc' \
+    --exclude='frontend/dist' \
+    --exclude='.git' \
+    --exclude='.DS_Store' \
+    --exclude='.vite' \
+    -e "ssh -p $SERVER_PORT" \
+    "$LOCAL_DIR/" "$REMOTE"
+ok "source synced"
+
+# ---------------------------------------------------------------
+step "2/5 remote: pip install (differential)"
+$SSH "cd $REMOTE_DIR && ./venv/bin/pip install -r backend/requirements.txt --quiet"
+ok "python deps up to date"
+
+# ---------------------------------------------------------------
+step "3/5 remote: npm run build"
+$SSH "cd $REMOTE_DIR/frontend && npm run build 2>&1 | tail -8"
+ok "frontend built"
+
+# ---------------------------------------------------------------
+step "4/5 remote: restart edu-backend"
+$SSH "systemctl restart edu-backend && sleep 1 && systemctl is-active edu-backend"
+ok "service active"
+
+# ---------------------------------------------------------------
+step "5/5 verify"
+health=$($SSH "curl -sf http://127.0.0.1:5060/api/health" || echo "FAIL")
+[[ "$health" == *"ok"* ]] || fail "backend health: $health"
+ok "backend /api/health"
+
+https_code=$(curl -s -o /dev/null -w "%{http_code}" "https://$DOMAIN/")
+[[ "$https_code" == "200" ]] || fail "https / returned $https_code"
+ok "https frontend 200"
+
+api_health=$(curl -s "https://$DOMAIN/api/health")
+[[ "$api_health" == *"ok"* ]] || fail "https api health: $api_health"
+ok "https /api/health"
+
+echo ""
+color '1;32' "🎉 deploy complete — https://$DOMAIN"
