@@ -62,8 +62,21 @@ $SSH "cd $REMOTE_DIR/frontend && npm run build 2>&1 | tail -8"
 ok "frontend built"
 
 # ---------------------------------------------------------------
-step "4/5 remote: restart edu-backend"
-$SSH "systemctl restart edu-backend && sleep 1 && systemctl is-active edu-backend"
+step "4/5 remote: restart edu-backend (+ install logrotate if changed)"
+$SSH "
+  # 只在文件不同时才更新 logrotate 配置
+  if ! cmp -s $REMOTE_DIR/deploy/logrotate-edu.conf /etc/logrotate.d/edu 2>/dev/null; then
+    cp $REMOTE_DIR/deploy/logrotate-edu.conf /etc/logrotate.d/edu
+    echo '[logrotate] updated /etc/logrotate.d/edu'
+  fi
+  # 证书健康检查脚本 → /etc/cron.d/edu-cert-check
+  if ! grep -q 'cert-check.sh' /etc/cron.d/edu-cert-check 2>/dev/null; then
+    echo '30 4 * * * root $REMOTE_DIR/deploy/cert-check.sh' > /etc/cron.d/edu-cert-check
+    chmod 644 /etc/cron.d/edu-cert-check
+    echo '[cron] installed /etc/cron.d/edu-cert-check'
+  fi
+  systemctl restart edu-backend && sleep 1 && systemctl is-active edu-backend
+"
 ok "service active"
 
 # ---------------------------------------------------------------

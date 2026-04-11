@@ -267,6 +267,19 @@ export const api = {
       }
     }>('/stats/llm/usage'),
 
+  // 每日一句话建议
+  dailyTip: () =>
+    request<{
+      id?: number
+      tip_date?: string
+      content?: string
+      status?: 'generating' | 'done' | 'failed'
+      error_message?: string | null
+      exists?: boolean
+      skipped?: boolean
+      reason?: string
+    }>('/dashboard/daily-tip'),
+
   // Dashboard summary (streak/训练/错题 等)
   dashboardSummary: () =>
     request<{

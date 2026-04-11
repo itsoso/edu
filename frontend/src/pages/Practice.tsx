@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, PracticeSet, PracticeItem } from '../api'
 import { usePolling } from '../hooks/usePolling'
+import EmptyState from '../components/EmptyState'
 
 export default function Practice() {
   const [sets, setSets] = useState<PracticeSet[]>([])
@@ -66,9 +67,14 @@ export default function Practice() {
         <aside className="md:col-span-2 bg-white border border-slate-200 rounded-lg p-3">
           <div className="text-xs text-slate-500 px-1 pb-2">训练题集</div>
           {sets.length === 0 ? (
-            <div className="text-sm text-slate-400 py-8 text-center">
-              还没有训练。去"错题本"点某道题 → "🏋️ 生成类题"
-            </div>
+            <EmptyState
+              variant="inline"
+              icon="🏋️"
+              title="还没有训练题"
+              description="去错题本, 点任意一道错题的'生成类题'"
+              ctaLabel="前往错题本"
+              ctaTo="/mistakes"
+            />
           ) : (
             <ul className="space-y-1">
               {sets.map((s) => {
@@ -106,9 +112,11 @@ export default function Practice() {
 
         <section className="md:col-span-3 space-y-4">
           {!active ? (
-            <div className="bg-white border border-slate-200 rounded-lg p-8 text-center text-sm text-slate-400">
-              选一份训练题集开始
-            </div>
+            <EmptyState
+              icon="👈"
+              title="选一份训练题集开始"
+              description="左边列表里点任意一项"
+            />
           ) : (
             <>
               <div className="bg-white border border-slate-200 rounded-lg p-4 flex items-center justify-between">

@@ -280,6 +280,24 @@ GENERATE_PRACTICE_PROMPT = """基于下面这道错题, 出 {count} 道类似难
 - 直接返回 JSON, 不要任何解释文字或 markdown 代码块
 """
 
+DAILY_TIP_PROMPT = """你是一位温暖务实的初中老师。根据学生 {student_name} 今天的学习状态,
+给她**一句简短具体的建议**(40-70 字), 告诉她今天应该优先做什么或者提醒她一个容易忽视的点。
+
+今天的状态数据:
+- 连续打卡: {streak_days} 天
+- 本月已打卡: {month_days} 天
+- 错题本: {mistakes_total} 道, 已掌握 {mistakes_mastered} 道
+- 本周训练: 做对 {practice_correct} / 已做 {practice_graded} / 共 {practice_total} 题
+- 最近 3 道错题的薄弱点: {weak_points}
+
+要求:
+- **只输出那一句建议**, 不要任何前缀后缀
+- 语气温暖但不煽情, 像朋友而非说教
+- 指向具体的行动 (例: "今天先把数学错题本里的'一元一次方程'那道题重做一遍")
+- 不超过 70 个字
+- 不要带引号
+"""
+
 MONTHLY_REPORT_PROMPT = """你是一位资深的初中老师, 正在为学生写月度学习复盘报告。
 
 这是 {student_name} 在 {month} 的学习数据:

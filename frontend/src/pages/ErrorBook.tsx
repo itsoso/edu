@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, Mistake } from '../api'
 import { useToast } from '../components/Toast'
+import EmptyState from '../components/EmptyState'
 
 const SUBJECTS = ['数学', '科学', '英语', '语文', '社会']
 const REASONS = ['计算错', '审题漏', '不会做', '步骤乱', '知识遗忘', '其他']
@@ -280,7 +281,18 @@ export default function ErrorBook() {
           </div>
         )}
         {mistakes.length === 0 ? (
-          <p className="text-slate-400 text-sm">还没有错题记录</p>
+          <EmptyState
+            icon="📓"
+            title="还没有错题记录"
+            description={
+              <>
+                从扫描试卷开始, 或者手动添加一道. 每道错题都是一次
+                <b className="text-slate-700">学会某件事的机会</b>。
+              </>
+            }
+            ctaLabel="📸 扫描试卷"
+            ctaTo="/scan"
+          />
         ) : (
           mistakes.map((m) => (
             <div

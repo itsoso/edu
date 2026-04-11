@@ -3,6 +3,7 @@ import { api, ExamUpload, ExtractedMistake } from '../api'
 import { compressImage, stitchImagesVertical, formatBytes } from '../utils/compressImage'
 import { usePolling } from '../hooks/usePolling'
 import { useToast } from '../components/Toast'
+import EmptyState from '../components/EmptyState'
 
 export default function Scan() {
   const toast = useToast()
@@ -191,7 +192,12 @@ export default function Scan() {
         <aside className="md:col-span-2 bg-white border border-slate-200 rounded-lg p-3">
           <div className="text-xs text-slate-500 px-1 pb-2">历史上传</div>
           {uploads.length === 0 ? (
-            <div className="text-sm text-slate-400 py-8 text-center">还没有上传记录</div>
+            <EmptyState
+              variant="inline"
+              icon="📸"
+              title="还没有上传记录"
+              description="上传一张试卷, AI 会帮你挑出所有错题"
+            />
           ) : (
             <ul className="space-y-1 max-h-96 overflow-y-auto">
               {uploads.map((u) => (
@@ -226,9 +232,11 @@ export default function Scan() {
         {/* 详情 */}
         <section className="md:col-span-3 bg-white border border-slate-200 rounded-lg p-5 space-y-4">
           {!active ? (
-            <div className="text-slate-400 py-16 text-center text-sm">
-              选一份历史上传, 或上传新的试卷
-            </div>
+            <EmptyState
+              icon="🗂️"
+              title="选一份历史上传"
+              description="或者上传新的试卷"
+            />
           ) : (
             <>
               <div className="flex items-start gap-3">

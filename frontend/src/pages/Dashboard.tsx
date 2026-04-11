@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, Exam, Task, Checkin } from '../api'
 import { useAuth } from '../auth'
+import { usePolling } from '../hooks/usePolling'
 
 function todayStr() {
   const d = new Date()
@@ -24,12 +25,21 @@ type Summary = {
   calendar_14d: { date: string; done: number }[]
 }
 
+type DailyTip = {
+  id?: number
+  content?: string
+  status?: 'generating' | 'done' | 'failed'
+  exists?: boolean
+  skipped?: boolean
+}
+
 export default function Dashboard() {
   const { user, boundStudent } = useAuth()
   const [exams, setExams] = useState<Exam[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [checkins, setCheckins] = useState<Checkin[]>([])
   const [summary, setSummary] = useState<Summary | null>(null)
+  const [tip, setTip] = useState<DailyTip | null>(null)
   const [week, setWeek] = useState(1)
 
   const today = todayStr()
@@ -40,7 +50,20 @@ export default function Dashboard() {
   useEffect(() => {
     api.listExams().then(setExams)
     api.dashboardSummary().then(setSummary).catch(() => {})
+    api.dailyTip().then(setTip).catch(() => {})
   }, [])
+
+  // Tip 生成中时自动轮询
+  const tipGenerating = tip?.status === 'generating'
+  usePolling(
+    async () => {
+      const t = await api.dailyTip()
+      setTip(t)
+      return t
+    },
+    (t: any) => t?.status === 'generating',
+    { interval: 3000, enabled: tipGenerating }
+  )
 
   useEffect(() => {
     api.listTasks(week, dow).then(setTasks)
@@ -95,6 +118,25 @@ export default function Dashboard() {
           )}
         </p>
       </div>
+
+      {/* 今日一句话 AI 建议 */}
+      {tip && !tip.skipped && (
+        <div className="bg-gradient-to-r from-brand-50 to-purple-50 border border-brand-200 rounded-lg p-4 flex items-start gap-3">
+          <span className="text-2xl">💡</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-slate-500 mb-1">今日建议</div>
+            {tip.status === 'generating' && (
+              <div className="text-sm text-slate-500 animate-pulse">AI 正在为你写今天的一句话...</div>
+            )}
+            {tip.status === 'done' && tip.content && (
+              <div className="text-sm text-slate-800 leading-relaxed">{tip.content}</div>
+            )}
+            {tip.status === 'failed' && (
+              <div className="text-xs text-slate-500">AI 暂时没话说, 明天见</div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 学生显示自己的 join_code, 家长扫码绑定用 */}
       {user?.role === 'student' && user.join_code && (

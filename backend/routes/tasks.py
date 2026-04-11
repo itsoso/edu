@@ -1,11 +1,16 @@
-"""Tasks, checkins, dashboard summary."""
+"""Tasks, checkins, dashboard summary, daily tip."""
+import logging
 from datetime import date, timedelta
 
 from flask import Blueprint, jsonify, request, abort, g
 
-from db import db, rows_to_dicts
+from db import db, row_to_dict, rows_to_dicts
 from auth import login_required
+from llm import get_llm, LLMError, DAILY_TIP_PROMPT
+from llm_audit import llm_audit
+from background import submit as bg_submit
 
+logger = logging.getLogger(__name__)
 bp = Blueprint("tasks", __name__)
 
 
@@ -196,3 +201,171 @@ def dashboard_summary():
         "calendar_14d": calendar,
         "today": today_str,
     })
+
+
+# ---------- 每日一句话建议 ----------
+def _run_daily_tip_bg(tip_id: int, context: dict, owner_id: int):
+    """后台: 调 LLM 写一句建议. 失败就把错误记到 row 上."""
+    try:
+        llm = get_llm()
+        prompt = DAILY_TIP_PROMPT.format(**context)
+        with llm_audit("daily_tip", owner_id=owner_id, model=llm.model) as audit:
+            audit.set_prompt_chars(len(prompt))
+            content = llm.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.6,
+                max_tokens=300,
+            )
+            audit.set_response_chars(len(content))
+        # 去掉 LLM 可能加的引号或空白
+        content = content.strip().strip('"').strip("'").strip()
+        with db() as conn:
+            conn.execute(
+                """UPDATE daily_tips
+                   SET content = ?, status = 'done', error_message = NULL
+                   WHERE id = ?""",
+                (content, tip_id),
+            )
+        logger.info("daily tip done for id %s", tip_id)
+    except Exception as e:
+        logger.exception("daily tip failed for id %s", tip_id)
+        with db() as conn:
+            conn.execute(
+                "UPDATE daily_tips SET status='failed', error_message=? WHERE id=?",
+                (str(e)[:500], tip_id),
+            )
+
+
+def _collect_tip_context(conn, owner_id: int) -> dict:
+    """收集今天建议 prompt 需要的指标. 复用 dashboard_summary 的部分查询."""
+    today = date.today()
+
+    # 学生名
+    u = conn.execute("SELECT display_name FROM users WHERE id = ?", (owner_id,)).fetchone()
+    student_name = u["display_name"] if u else "同学"
+
+    # 连续打卡 (60 天窗口)
+    window = (today - timedelta(days=60)).isoformat()
+    days_rows = conn.execute(
+        """SELECT DISTINCT checkin_date FROM checkins c
+           JOIN tasks t ON c.task_id = t.id
+           WHERE t.owner_user_id = ? AND c.completed = 1
+             AND c.checkin_date >= ?""",
+        (owner_id, window),
+    ).fetchall()
+    checked = {r["checkin_date"] for r in days_rows}
+    streak = 0
+    cursor = today
+    if today.isoformat() not in checked and (today - timedelta(days=1)).isoformat() in checked:
+        cursor = today - timedelta(days=1)
+    while cursor.isoformat() in checked:
+        streak += 1
+        cursor -= timedelta(days=1)
+
+    # 本月
+    month_start = today.replace(day=1).isoformat()
+    month_days = conn.execute(
+        """SELECT COUNT(DISTINCT c.checkin_date) AS d FROM checkins c
+           JOIN tasks t ON c.task_id = t.id
+           WHERE t.owner_user_id = ? AND c.completed = 1
+             AND c.checkin_date >= ?""",
+        (owner_id, month_start),
+    ).fetchone()["d"]
+
+    # 错题
+    m = conn.execute(
+        """SELECT COUNT(*) AS total,
+                  SUM(CASE WHEN mastered = 1 THEN 1 ELSE 0 END) AS mastered
+           FROM mistakes WHERE owner_user_id = ?""",
+        (owner_id,),
+    ).fetchone()
+
+    # 最近 3 道错题知识点
+    recent = conn.execute(
+        """SELECT knowledge_point, subject, reason FROM mistakes
+           WHERE owner_user_id = ? AND mastered = 0
+           ORDER BY created_at DESC LIMIT 3""",
+        (owner_id,),
+    ).fetchall()
+    weak_points = "; ".join(
+        f"{r['subject'] or '?'} - {r['knowledge_point'] or r['reason'] or '?'}"
+        for r in recent
+    ) or "暂无"
+
+    # 本周训练
+    week_ago = (today - timedelta(days=6)).isoformat()
+    p = conn.execute(
+        """SELECT COUNT(pi.id) AS total,
+                  SUM(CASE WHEN pi.is_correct IS NOT NULL THEN 1 ELSE 0 END) AS graded,
+                  SUM(CASE WHEN pi.is_correct = 1 THEN 1 ELSE 0 END) AS correct
+           FROM practice_items pi JOIN practice_sets ps ON pi.set_id = ps.id
+           WHERE ps.owner_user_id = ? AND date(ps.created_at) >= ?""",
+        (owner_id, week_ago),
+    ).fetchone()
+
+    return {
+        "student_name": student_name,
+        "streak_days": streak,
+        "month_days": month_days,
+        "mistakes_total": m["total"] or 0,
+        "mistakes_mastered": m["mastered"] or 0,
+        "practice_total": p["total"] or 0,
+        "practice_graded": p["graded"] or 0,
+        "practice_correct": p["correct"] or 0,
+        "weak_points": weak_points,
+    }
+
+
+@bp.get("/api/dashboard/daily-tip")
+@login_required
+def get_daily_tip():
+    """
+    获取/触发今日一句话建议.
+
+    行为:
+    - 如果今天的 tip 已存在 (done/generating/failed), 直接返回
+    - 如果不存在, 且 LLM 未配置 -> 不生成, 返回 {exists:false, skipped:true}
+    - 如果不存在, 且 LLM 已配置 -> 创建 generating 占位并异步启动, 返回 status=generating
+
+    前端调用一次即可. 需要更新时, 轮询这个端点直到 status != 'generating'.
+    """
+    today_str = date.today().isoformat()
+
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM daily_tips WHERE owner_user_id = ? AND tip_date = ?",
+            (g.owner_id, today_str),
+        ).fetchone()
+
+        if row:
+            return jsonify(row_to_dict(row))
+
+        # 不存在 → 检查 LLM 是否可用
+        if not get_llm().configured():
+            return jsonify({"exists": False, "skipped": True, "reason": "llm_not_configured"})
+
+        # 创建占位
+        context = _collect_tip_context(conn, g.owner_id)
+        cur = conn.execute(
+            """INSERT INTO daily_tips (owner_user_id, tip_date, content, status)
+               VALUES (?, ?, '', 'generating')""",
+            (g.owner_id, today_str),
+        )
+        tip_id = cur.lastrowid
+        row = conn.execute("SELECT * FROM daily_tips WHERE id = ?", (tip_id,)).fetchone()
+
+    bg_submit(_run_daily_tip_bg, tip_id, context, g.owner_id)
+    return jsonify(row_to_dict(row)), 202
+
+
+@bp.delete("/api/dashboard/daily-tip")
+@login_required
+def delete_today_tip():
+    """删今天的 tip, 让下次 GET 重新生成 (调试用)."""
+    today_str = date.today().isoformat()
+    with db() as conn:
+        conn.execute(
+            "DELETE FROM daily_tips WHERE owner_user_id = ? AND tip_date = ?",
+            (g.owner_id, today_str),
+        )
+    return {"ok": True}
