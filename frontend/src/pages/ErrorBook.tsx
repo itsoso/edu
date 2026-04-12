@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast'
 import EmptyState from '../components/EmptyState'
 import ReflectionField from '../components/ReflectionField'
 import MathText from '../components/MathText'
+import SolutionSteps from '../components/SolutionSteps'
 
 const SUBJECTS = ['数学', '科学', '英语', '语文', '社会']
 const REASONS = ['计算错', '审题漏', '不会做', '步骤乱', '知识遗忘', '其他']
@@ -336,6 +337,17 @@ export default function ErrorBook() {
                         <AnswerReveal label="对" answer={m.correct_answer} />
                       )}
                     </div>
+                  )}
+                  {/* 解题过程 (可折叠) */}
+                  {m.solution_steps && (
+                    <details className="mt-2 text-sm">
+                      <summary className="cursor-pointer text-purple-600 hover:text-purple-800 text-xs font-medium">
+                        ▶ 参考思路 (点击展开完整解题过程)
+                      </summary>
+                      <div className="mt-2 bg-slate-50 border border-slate-200 rounded p-3">
+                        <SolutionSteps steps={m.solution_steps} />
+                      </div>
+                    </details>
                   )}
                   {/* 她说 — 永远不喂给 AI */}
                   <ReflectionField

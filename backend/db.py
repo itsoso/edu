@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS mistakes (
     correct_answer   TEXT,
     reason           TEXT    NOT NULL,
     knowledge_point  TEXT,
+    solution_steps   TEXT,                        -- 完整解题过程 (Markdown + LaTeX)
     mastered         INTEGER DEFAULT 0,
     created_at       TEXT    DEFAULT CURRENT_TIMESTAMP,
     mastered_at      TEXT,
@@ -340,6 +341,9 @@ def _run_migrations(conn):
         conn.execute("ALTER TABLE monthly_reports ADD COLUMN status TEXT DEFAULT 'done'")
     if not _column_exists(conn, "monthly_reports", "error_message"):
         conn.execute("ALTER TABLE monthly_reports ADD COLUMN error_message TEXT")
+    # mistakes.solution_steps (完整解题过程, Markdown + LaTeX)
+    if not _column_exists(conn, "mistakes", "solution_steps"):
+        conn.execute("ALTER TABLE mistakes ADD COLUMN solution_steps TEXT")
 
 
 def init_db():

@@ -3,6 +3,7 @@ import { api, PracticeSet, PracticeItem } from '../api'
 import { usePolling } from '../hooks/usePolling'
 import EmptyState from '../components/EmptyState'
 import MathText from '../components/MathText'
+import SolutionSteps from '../components/SolutionSteps'
 
 export default function Practice() {
   const [sets, setSets] = useState<PracticeSet[]>([])
@@ -274,8 +275,12 @@ function ItemCard({
 
       {(showSolution || done) && item.solution_steps && (
         <details className="text-sm" open={done}>
-          <summary className="cursor-pointer text-slate-500">参考思路</summary>
-          <div className="mt-2 text-slate-700 whitespace-pre-wrap">{item.solution_steps}</div>
+          <summary className="cursor-pointer text-purple-600 hover:text-purple-800 font-medium">
+            ▶ 参考思路
+          </summary>
+          <div className="mt-2 bg-slate-50 border border-slate-200 rounded p-3">
+            <SolutionSteps steps={item.solution_steps} />
+          </div>
           {item.expected_answer && (
             <div className="mt-1 text-xs text-slate-600">
               标准答案: <span className="font-mono">{item.expected_answer}</span>

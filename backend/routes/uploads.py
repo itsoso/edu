@@ -295,8 +295,8 @@ def save_extracted_mistakes(upload_id):
                 cur = conn.execute(
                     """INSERT INTO mistakes
                        (owner_user_id, subject, exam_name, question_text, wrong_answer,
-                        correct_answer, reason, knowledge_point)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        correct_answer, reason, knowledge_point, solution_steps)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         g.owner_id,
                         subject,
@@ -306,6 +306,7 @@ def save_extracted_mistakes(upload_id):
                         m.get("correct_answer"),
                         m.get("reason_guess") or "其他",
                         m.get("knowledge_point"),
+                        m.get("solution_steps"),
                     ),
                 )
                 saved_ids.append(cur.lastrowid)

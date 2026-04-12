@@ -200,6 +200,7 @@ export type Mistake = {
   question_text: string | null
   wrong_answer: string | null
   correct_answer: string | null
+  solution_steps: string | null
   reason: string
   knowledge_point: string | null
   mastered: number

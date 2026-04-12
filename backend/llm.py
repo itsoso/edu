@@ -217,9 +217,10 @@ EXTRACT_MISTAKES_PROMPT = """请仔细看这张试卷照片, 找出其中**被�
   "mistakes": [
     {
       "question_number": "题号或定位(如'1'、'选择3'、'大题二(1)')",
-      "question_text": "完整题目文字, 用简体中文",
+      "question_text": "完整题目文字, 数学公式用 $...$ LaTeX 包裹 (如 $ax^{2}+(3a-5)x+2(a-5)=0$, $\\sqrt{bx_{1}-x_{2}}$)",
       "wrong_answer": "学生写的错答案",
-      "correct_answer": "正确答案, 如果试卷上没标注, 填'待确认'",
+      "correct_answer": "正确答案 (简短, 如 $x_{2}=-2$, $c=49$)",
+      "solution_steps": "完整解题过程, 用 Markdown + LaTeX 格式 (见下方要求)",
       "reason_guess": "计算错|审题漏|不会做|步骤乱|知识遗忘|其他",
       "knowledge_point": "涉及的知识点, 简短(如: 一元二次方程判别式)",
       "confidence": 0.0~1.0
@@ -227,10 +228,19 @@ EXTRACT_MISTAKES_PROMPT = """请仔细看这张试卷照片, 找出其中**被�
   ]
 }
 
+**solution_steps 格式要求 (重要):**
+写成一个初二学生能看懂的、完整的推导过程:
+- 每一步用 **加粗标题** 开头, 换行写推导
+- 数学公式用 $...$ 包裹 (LaTeX 语法)
+- 分数用 $\\frac{a}{b}$, 根号用 $\\sqrt{expr}$, 上标用 $x^{2}$, 下标用 $x_{1}$
+- 不要跳步, 让初中生能跟上
+- 最后一步有 "所以答案是 $...$"
+
 规则:
 - 如果图片模糊看不清某题, 在 question_text 里写 '模糊' 并 confidence < 0.4
 - 没标扣分的对题不要包含
 - 如果没有任何错题, 返回 { "subject": "...", "mistakes": [] }
+- 所有数学公式必须用 $...$ LaTeX 包裹, 不要用纯 Unicode 的 √ ² 等
 - 直接返回 JSON, 不要任何解释文字或 markdown 代码块
 """
 
@@ -265,18 +275,30 @@ GENERATE_PRACTICE_PROMPT = """基于下面这道错题, 出 {count} 道类似难
 {{
   "items": [
     {{
-      "question_text": "题目全文",
-      "expected_answer": "标准答案",
-      "solution_steps": "解题思路(3-5 步, 简明)",
+      "question_text": "题目全文 (数学公式用 $...$ LaTeX 格式, 例如 $x^2+3x-5=0$, $\\\\sqrt{{x+1}}$)",
+      "expected_answer": "标准答案 (简短, 如 x=-2, c=49)",
+      "solution_steps": "详细解题过程 (见下方格式要求)",
       "difficulty": "easy|medium|hard"
     }}
   ]
 }}
 
+**solution_steps 格式要求 (重要):**
+写成一个初二学生能看懂的、完整的推导过程. 用 Markdown 格式:
+- 每一步用 **加粗标题** 开头, 换行写推导
+- 数学公式用 $...$ 包裹 (LaTeX 语法)
+- 分数用 $\\\\frac{{a}}{{b}}$, 根号用 $\\\\sqrt{{expr}}$, 上标用 $x^{{2}}$, 下标用 $x_{{1}}$
+- 不要跳步, 每步之间有逻辑连接词 ("因此", "代入得", "所以")
+- 最后一步必须有 "所以答案是 $...$"
+
+示例:
+"**先因式分解原方程:**\\n\\n$ax^{{2}}+(3a-5)x+2(a-5)=0$\\n\\n可写成 $(x+2)(ax+a-5)=0$\\n\\n**所以两个根是:**\\n\\n$x=-2$, $x=\\\\frac{{5-a}}{{a}}$\\n\\n**因为 $a>0$, 比较两根大小:**\\n\\n$\\\\frac{{5-a}}{{a}}-(-2)=\\\\frac{{5+a}}{{a}}>0$\\n\\n所以 $x_{{1}}=\\\\frac{{5-a}}{{a}}$, $x_{{2}}=-2$"
+
 要求:
 - 难度与原题相当或略高
 - 题面与原题不同 (换数字/换情境/换问法), 但本质考同一知识点
 - 每题的 expected_answer 必须明确、简短、可对照
+- question_text 和 solution_steps 中的数学公式必须用 $...$ LaTeX 包裹
 - 直接返回 JSON, 不要任何解释文字或 markdown 代码块
 """
 
