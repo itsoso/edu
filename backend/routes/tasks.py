@@ -18,20 +18,156 @@ bp = Blueprint("tasks", __name__)
 @bp.get("/api/tasks")
 @login_required
 def list_tasks():
+    """
+    返回模板任务, 如果 query 里带 week_start=YYYY-MM-DD,
+    会 LEFT JOIN task_overrides 并返回 override 字段.
+
+    响应里每条 task 多了这些字段:
+    - override_action: None | 'skip' | 'replace'
+    - override_title / description / minutes: 如果是 replace
+    - effective_title / description / minutes: 她实际看到的版本
+                                                 (replace 用她的, 否则用模板的)
+
+    这样前端渲染逻辑非常简单 — 用 effective_* 就行.
+    """
     week = request.args.get("week", type=int)
     day = request.args.get("day", type=int)
-    query = "SELECT * FROM tasks WHERE owner_user_id = ?"
-    args = [g.owner_id]
+    week_start = request.args.get("week_start")  # YYYY-MM-DD, 可选
+
+    clauses = ["t.owner_user_id = ?"]
+    args: list = [g.owner_id]
     if week:
-        query += " AND week = ?"
+        clauses.append("t.week = ?")
         args.append(week)
     if day:
-        query += " AND day_of_week = ?"
+        clauses.append("t.day_of_week = ?")
         args.append(day)
-    query += " ORDER BY week, day_of_week, id"
+    where_sql = " AND ".join(clauses)
+
+    if week_start:
+        query = f"""
+            SELECT t.*,
+                   o.action        AS override_action,
+                   o.custom_title  AS override_title,
+                   o.custom_description AS override_description,
+                   o.custom_minutes     AS override_minutes
+            FROM tasks t
+            LEFT JOIN task_overrides o
+                ON o.task_id = t.id
+                AND o.owner_user_id = t.owner_user_id
+                AND o.week_start = ?
+            WHERE {where_sql}
+            ORDER BY t.week, t.day_of_week, t.id
+        """
+        query_args = [week_start] + args
+    else:
+        query = f"SELECT * FROM tasks t WHERE {where_sql} ORDER BY t.week, t.day_of_week, t.id"
+        query_args = args
+
     with db() as conn:
-        rows = conn.execute(query, args).fetchall()
-    return jsonify(rows_to_dicts(rows))
+        rows = conn.execute(query, query_args).fetchall()
+
+    out = []
+    for r in rows:
+        d = row_to_dict(r)
+        action = d.get("override_action")
+        # 计算 effective_* 字段 — 前端直接用
+        if action == "replace":
+            d["effective_title"] = d.get("override_title") or d["title"]
+            d["effective_description"] = (
+                d.get("override_description") if d.get("override_description") is not None
+                else d["description"]
+            )
+            d["effective_minutes"] = d.get("override_minutes") or d["minutes"]
+        else:
+            d["effective_title"] = d["title"]
+            d["effective_description"] = d["description"]
+            d["effective_minutes"] = d["minutes"]
+        out.append(d)
+    return jsonify(out)
+
+
+# ---------- 任务覆盖 (阶段 3: 她可以 skip / replace 模板任务) ----------
+@bp.post("/api/tasks/<int:task_id>/override")
+@login_required
+def upsert_task_override(task_id):
+    """
+    请求体:
+    {
+      "week_start": "YYYY-MM-DD",   # 必填, 归属哪一周
+      "action": "skip" | "replace",
+      "custom_title": "...",         # action=replace 时可选
+      "custom_description": "...",   # 同上
+      "custom_minutes": 30           # 同上
+    }
+    """
+    payload = request.get_json(force=True) or {}
+    week_start = payload.get("week_start")
+    action = payload.get("action")
+    if not week_start or len(week_start) != 10:
+        return jsonify({"error": "invalid_week_start"}), 400
+    if action not in ("skip", "replace"):
+        return jsonify({"error": "invalid_action"}), 400
+
+    with db() as conn:
+        task = conn.execute(
+            "SELECT owner_user_id FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        if not task:
+            abort(404)
+        if task["owner_user_id"] != g.owner_id:
+            abort(403)
+
+        if action == "skip":
+            conn.execute(
+                """INSERT INTO task_overrides
+                   (owner_user_id, task_id, week_start, action)
+                   VALUES (?, ?, ?, 'skip')
+                   ON CONFLICT(owner_user_id, task_id, week_start) DO UPDATE SET
+                       action = 'skip',
+                       custom_title = NULL,
+                       custom_description = NULL,
+                       custom_minutes = NULL""",
+                (g.owner_id, task_id, week_start),
+            )
+        else:  # replace
+            custom_title = payload.get("custom_title")
+            if not custom_title:
+                return jsonify({"error": "custom_title_required"}), 400
+            conn.execute(
+                """INSERT INTO task_overrides
+                   (owner_user_id, task_id, week_start, action,
+                    custom_title, custom_description, custom_minutes)
+                   VALUES (?, ?, ?, 'replace', ?, ?, ?)
+                   ON CONFLICT(owner_user_id, task_id, week_start) DO UPDATE SET
+                       action = 'replace',
+                       custom_title = excluded.custom_title,
+                       custom_description = excluded.custom_description,
+                       custom_minutes = excluded.custom_minutes""",
+                (
+                    g.owner_id, task_id, week_start,
+                    custom_title,
+                    payload.get("custom_description"),
+                    payload.get("custom_minutes"),
+                ),
+            )
+    return {"ok": True}
+
+
+@bp.delete("/api/tasks/<int:task_id>/override")
+@login_required
+def delete_task_override(task_id):
+    """取消某一周对某个任务的覆盖 (恢复成模板)."""
+    week_start = request.args.get("week_start")
+    if not week_start:
+        return jsonify({"error": "week_start_required"}), 400
+    with db() as conn:
+        conn.execute(
+            """DELETE FROM task_overrides
+               WHERE owner_user_id = ? AND task_id = ? AND week_start = ?""",
+            (g.owner_id, task_id, week_start),
+        )
+    return {"ok": True}
 
 
 # ---------- 打卡 ----------

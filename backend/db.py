@@ -119,6 +119,41 @@ CREATE TABLE IF NOT EXISTS practice_sets (
     FOREIGN KEY (source_mistake_id) REFERENCES mistakes(id)  ON DELETE SET NULL
 );
 
+-- 周目标: 她每周一主动设定的学习目标 (阶段 3)
+-- 设计理由: 元学习的核心是"识别自己当下该学什么".
+-- 没有 goal 时系统不强塞, 让她感受到选择的空间.
+CREATE TABLE IF NOT EXISTS weekly_goals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL,
+    week_start      TEXT    NOT NULL,             -- YYYY-MM-DD (周一)
+    goal_text       TEXT    NOT NULL,             -- 她写的目标
+    focus_type      TEXT,                          -- 'redo_mistakes'|'learn_new'|'challenge'|'custom'
+    created_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(owner_user_id, week_start),
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- 任务覆盖: 她对模板任务的"跳过/替换" (阶段 3)
+-- 设计理由: 默认状态应该是空的, 她不选才用模板.
+-- 但为了不动现有 tasks 表, 用覆盖层实现 — 模板任务保留, 覆盖是一层.
+-- action ∈ { skip | replace }
+--   skip: 本周跳过这个任务, 不算数
+--   replace: 用她自己的内容替换, custom_title/description 生效
+CREATE TABLE IF NOT EXISTS task_overrides (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL,
+    task_id         INTEGER NOT NULL,             -- → tasks.id (模板任务)
+    week_start      TEXT    NOT NULL,             -- YYYY-MM-DD 归属哪一周
+    action          TEXT    NOT NULL,
+    custom_title    TEXT,
+    custom_description TEXT,
+    custom_minutes  INTEGER,
+    created_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(owner_user_id, task_id, week_start),
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (task_id)       REFERENCES tasks(id) ON DELETE CASCADE
+);
+
 -- 反思 / 主观表达 (她的声音). **这张表永远不喂给 LLM**.
 -- kind ∈ { mistake_note | weekly_note | free_write | exam_feeling }
 -- 设计理由: 学习不只是数据, 还有她对学习的感受和思考.
@@ -210,6 +245,8 @@ CREATE INDEX IF NOT EXISTS idx_daily_tips_owner    ON daily_tips(owner_user_id, 
 CREATE INDEX IF NOT EXISTS idx_reflections_owner_k ON reflections(owner_user_id, kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reflections_related ON reflections(owner_user_id, kind, related_id);
 CREATE INDEX IF NOT EXISTS idx_reflections_rkey    ON reflections(owner_user_id, kind, related_key);
+CREATE INDEX IF NOT EXISTS idx_weekly_goals_owner   ON weekly_goals(owner_user_id, week_start DESC);
+CREATE INDEX IF NOT EXISTS idx_task_overrides_week  ON task_overrides(owner_user_id, week_start);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_owner    ON llm_calls(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_date     ON llm_calls(created_at DESC);
 """

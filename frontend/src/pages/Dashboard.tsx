@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api, Task, Checkin } from '../api'
 import { useAuth } from '../auth'
 import { usePolling } from '../hooks/usePolling'
+import WeeklyGoalCeremony from '../components/WeeklyGoalCeremony'
 
 function todayStr() {
   const d = new Date()
@@ -153,6 +154,9 @@ export default function Dashboard() {
           {displayName}，今天是 <span className="font-semibold text-brand-700">第 {week} 周 · 周{'一二三四五六日'[dow - 1]}</span>
         </p>
       </div>
+
+      {/* 🆕 阶段 3: 周目标仪式 — 这周你最想攻克什么 */}
+      <WeeklyGoalCeremony weekStart={weekOf} />
 
       {/* 🆕 本周我学到了什么 — 她自己的空间 */}
       <div className="bg-white rounded-lg border border-slate-200 p-5">

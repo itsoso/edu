@@ -66,6 +66,23 @@ export type Task = {
   title: string
   description: string | null
   minutes: number
+  // 阶段 3: 如果请求带了 week_start, 这些字段会填充
+  override_action?: 'skip' | 'replace' | null
+  override_title?: string | null
+  override_description?: string | null
+  override_minutes?: number | null
+  effective_title?: string
+  effective_description?: string | null
+  effective_minutes?: number
+}
+
+export type WeeklyGoal = {
+  id: number
+  owner_user_id: number
+  week_start: string
+  goal_text: string
+  focus_type: 'redo_mistakes' | 'learn_new' | 'challenge' | 'custom' | null
+  created_at: string
 }
 
 export type Checkin = {
@@ -212,12 +229,53 @@ export const api = {
   scoresTrend: () => request<any[]>('/scores/trend'),
 
   // Tasks + checkins
-  listTasks: (week?: number, day?: number) => {
+  listTasks: (week?: number, day?: number, weekStart?: string) => {
     const qs = new URLSearchParams()
     if (week) qs.set('week', String(week))
     if (day) qs.set('day', String(day))
+    if (weekStart) qs.set('week_start', weekStart)
     return request<Task[]>(`/tasks${qs.toString() ? '?' + qs : ''}`)
   },
+
+  // 阶段 3: task overrides
+  overrideTask: (
+    taskId: number,
+    data: {
+      week_start: string
+      action: 'skip' | 'replace'
+      custom_title?: string
+      custom_description?: string
+      custom_minutes?: number
+    }
+  ) =>
+    request<{ ok: boolean }>(`/tasks/${taskId}/override`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  clearTaskOverride: (taskId: number, weekStart: string) =>
+    request<{ ok: boolean }>(
+      `/tasks/${taskId}/override?week_start=${encodeURIComponent(weekStart)}`,
+      { method: 'DELETE' }
+    ),
+
+  // 阶段 3: weekly goals
+  listWeeklyGoals: (limit?: number) =>
+    request<WeeklyGoal[]>(`/goals/weekly${limit ? '?limit=' + limit : ''}`),
+  getWeeklyGoal: (weekStart: string) =>
+    request<{ exists: boolean; week_start: string } & Partial<WeeklyGoal>>(
+      `/goals/weekly/${weekStart}`
+    ),
+  upsertWeeklyGoal: (data: {
+    week_start: string
+    goal_text: string
+    focus_type?: 'redo_mistakes' | 'learn_new' | 'challenge' | 'custom'
+  }) =>
+    request<WeeklyGoal>('/goals/weekly', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteWeeklyGoal: (weekStart: string) =>
+    request<{ ok: boolean }>(`/goals/weekly/${weekStart}`, { method: 'DELETE' }),
   listCheckins: (date?: string) =>
     request<Checkin[]>(`/checkins${date ? '?date=' + date : ''}`),
   upsertCheckin: (data: any) =>

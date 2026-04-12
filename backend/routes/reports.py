@@ -127,6 +127,26 @@ def _collect_monthly_metrics(conn, owner_id: int, month: str) -> dict:
     pi_graded = pi_stats["graded"] or 0
     pi_rate = f"{pi_correct}/{pi_graded}" if pi_graded else "暂无作答"
 
+    # 主动性 / agency 指标 (阶段 3)
+    weekly_goals_set = conn.execute(
+        """SELECT COUNT(*) AS n FROM weekly_goals
+           WHERE owner_user_id = ?
+             AND week_start >= ? AND week_start < ?""",
+        (owner_id, start, end),
+    ).fetchone()["n"]
+
+    override_stats = conn.execute(
+        """SELECT
+              SUM(CASE WHEN action = 'skip' THEN 1 ELSE 0 END) AS skipped,
+              SUM(CASE WHEN action = 'replace' THEN 1 ELSE 0 END) AS replaced
+           FROM task_overrides
+           WHERE owner_user_id = ?
+             AND week_start >= ? AND week_start < ?""",
+        (owner_id, start, end),
+    ).fetchone()
+    tasks_skipped = override_stats["skipped"] or 0
+    tasks_replaced = override_stats["replaced"] or 0
+
     return {
         "student_name": student_name,
         "month": month,
@@ -148,6 +168,9 @@ def _collect_monthly_metrics(conn, owner_id: int, month: str) -> dict:
         "practice_set_count": ps_count,
         "practice_item_count": pi_total,
         "practice_correct_rate": pi_rate,
+        "weekly_goals_set": weekly_goals_set,
+        "tasks_skipped": tasks_skipped,
+        "tasks_replaced": tasks_replaced,
     }
 
 
@@ -202,6 +225,9 @@ def _format_metrics_for_prompt(metrics: dict) -> dict:
         "practice_set_count": metrics["practice_set_count"],
         "practice_item_count": metrics["practice_item_count"],
         "practice_correct_rate": metrics["practice_correct_rate"],
+        "weekly_goals_set": metrics.get("weekly_goals_set", 0),
+        "tasks_skipped": metrics.get("tasks_skipped", 0),
+        "tasks_replaced": metrics.get("tasks_replaced", 0),
     }
 
 
