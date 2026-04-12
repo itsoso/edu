@@ -33,10 +33,13 @@ const MATH_SIGNAL = /[√²³⁴⁵⁶⁷⁸⁹⁰^=≤≥≠±×÷]/  // 表明
  * 核心策略: 找到"数学信号字符" → 向左右扩展到连续数学字符的边界 → 整段标记为数学.
  * 没有信号字符的纯字母数字不会被误判为数学.
  */
-function splitMathSegments(raw: string): { text: string; isMath: boolean }[] {
-  // 如果已有 $...$ 分隔符, 用它
+function splitMathSegments(raw: string): { text: string; isMath: boolean; isRawLatex?: boolean }[] {
+  // 如果已有 $...$ 分隔符, 用它. 标记 isRawLatex=true 表示已经是 LaTeX, 不需要 toLatex()
   if (raw.includes('$')) {
-    return splitByDollar(raw)
+    return splitByDollar(raw).map((s) => ({
+      ...s,
+      isRawLatex: s.isMath, // $...$ 里的内容已经是 LaTeX
+    }))
   }
 
   // 没有任何数学信号, 纯文本
@@ -142,11 +145,13 @@ function toLatex(expr: string): string {
 }
 
 function renderSegments(
-  segments: { text: string; isMath: boolean }[]
+  segments: { text: string; isMath: boolean; isRawLatex?: boolean }[]
 ): (string | { html: string })[] {
   return segments.map((seg) => {
     if (!seg.isMath) return seg.text
-    const latex = toLatex(seg.text)
+    // isRawLatex: $...$ 里已经是 LaTeX, 直接给 KaTeX, 不经过 toLatex()
+    // 否则 (信号扩展法匹配的伪数学): 需要 toLatex() 转换
+    const latex = seg.isRawLatex ? seg.text : toLatex(seg.text)
     try {
       const html = katex.renderToString(latex, {
         throwOnError: false,
@@ -154,7 +159,8 @@ function renderSegments(
       })
       return { html }
     } catch {
-      return seg.text
+      // KaTeX 解析失败, 返回原文本 (带 $ 分隔符以便用户看到是公式)
+      return seg.isRawLatex ? `$${seg.text}$` : seg.text
     }
   })
 }
