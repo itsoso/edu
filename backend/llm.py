@@ -377,6 +377,59 @@ MONTHLY_REPORT_PROMPT = """你是一位资深的初中老师, 正在为学生写
 - 直接输出 Markdown, 不要代码块包裹, 不要加任何前后缀
 """
 
+ESSAY_OCR_PROMPT = """请识别这张作文照片的完整文字内容。
+
+要求:
+- 逐字还原, 包括标点符号
+- 如果有涂改/修正痕迹, 以最终版本为准
+- 如果是作文纸, 只提取学生写的内容, 忽略印刷格线
+- 如果有标题, 单独提取
+
+严格返回 JSON:
+
+{
+  "title": "作文标题 (如果能识别, 否则填 null)",
+  "content": "作文正文全文",
+  "confidence": 0.0~1.0,
+  "issues": ["识别可能不准确的部分说明"]
+}
+
+直接返回 JSON, 不要任何解释文字或 markdown 代码块。
+"""
+
+ESSAY_ANALYSIS_PROMPT = """你是一位资深的初中语文老师, 善于批改作文. 请对以下作文进行详细批改.
+
+作文类型: {essay_type}
+题目/话题: {topic}
+字数: {word_count}
+
+作文正文:
+{content}
+
+严格返回 JSON:
+
+{{
+  "score": 0~100,
+  "grade": "A+|A|B+|B|C+|C|D",
+  "strengths": ["亮点 2-4 条, 具体引用原文中的好句子/好段落"],
+  "weaknesses": ["不足 2-4 条, 具体指出问题在哪一段/哪句话"],
+  "structure_analysis": "结构分析: 开头是否引人/主体是否充实/结尾是否有力, 150 字以内",
+  "language_analysis": "语言分析: 词汇是否丰富/句式是否多变/有无修辞亮点, 150 字以内",
+  "content_analysis": "内容分析: 立意是否深刻/选材是否新颖/详略是否得当, 150 字以内",
+  "improvement_suggestions": ["具体可执行的改进建议 3-5 条, 每条 ≤ 50 字"],
+  "model_sentences": [
+    {{"original": "原文中可以改进的句子", "improved": "改写后的版本", "reason": "为什么更好"}}
+  ],
+  "overall_comment": "总评 100-200 字, 语气温暖但真诚, 先肯定再建议"
+}}
+
+要求:
+- 评分标准参考中考作文评分 (内容 25 + 语言 25 + 结构 25 + 书写 5 = 80 分制换算到百分制)
+- strengths 和 weaknesses 必须引用原文, 不能空泛
+- model_sentences 至少给 2 个改写示例
+- 直接返回 JSON, 不要任何解释文字或 markdown 代码块
+"""
+
 GRADE_PRACTICE_PROMPT = """请判断学生的作答是否正确, 并给出简明点评。
 
 题目: {question_text}

@@ -19,6 +19,15 @@ MAX_MEDIA_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB (视频)
 MAX_AUDIO_DURATION_SECS = 180   # 3 分钟
 MAX_VIDEO_DURATION_SECS = 120   # 2 分钟
 
+# 作文管理
+ESSAY_UPLOAD_DIR = BACKEND_DIR / "data" / "uploads" / "essays"
+MAX_ESSAY_PHOTO_BYTES = 8 * 1024 * 1024    # 8 MB
+MAX_ESSAY_DOC_BYTES = 5 * 1024 * 1024      # 5 MB
+ALLOWED_ESSAY_DOC_EXT = {"docx", "doc"}
+MAX_ESSAY_TEXT_CHARS = 10000
+ESSAY_TYPES = ["记叙文", "议论文", "说明文", "应用文"]
+
 # 确保运行时目录存在 (import 时就建, 避免每个 blueprint 都判)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 JOURNAL_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ESSAY_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

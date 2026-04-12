@@ -19,11 +19,13 @@ const Practice = lazy(() => import('./pages/Practice'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Journal = lazy(() => import('./pages/Journal'))
+const Essays = lazy(() => import('./pages/Essays'))
 
 const navItems = [
   { to: '/', label: '今日', icon: '🏠', end: true },
   { to: '/journal', label: '日记', icon: '🕊️' },
   { to: '/mistakes', label: '错题本', icon: '📓' },
+  { to: '/essays', label: '作文', icon: '📝' },
   { to: '/scan', label: '扫试卷', icon: '📸' },
   { to: '/practice', label: '训练', icon: '🏋️' },
   { to: '/trends', label: '趋势', icon: '📈' },
@@ -126,6 +128,7 @@ function Shell() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/trends" element={<Trends />} />
             <Route path="/plan" element={<Plan />} />
+            <Route path="/essays" element={<Essays />} />
             <Route path="/scan" element={<Scan />} />
             <Route path="/mistakes" element={<ErrorBook />} />
             <Route path="/practice" element={<Practice />} />

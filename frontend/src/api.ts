@@ -193,6 +193,39 @@ export type JournalMedia = {
   created_at: string
 }
 
+export type EssayAnalysis = {
+  score: number
+  grade: string
+  strengths: string[]
+  weaknesses: string[]
+  structure_analysis: string
+  language_analysis: string
+  content_analysis: string
+  improvement_suggestions: string[]
+  model_sentences: { original: string; improved: string; reason: string }[]
+  overall_comment: string
+}
+
+export type Essay = {
+  id: number
+  owner_user_id: number
+  title: string | null
+  content: string
+  source_type: 'photo' | 'document' | 'text'
+  file_path: string | null
+  file_name: string | null
+  file_url: string | null
+  essay_type: string | null
+  topic: string | null
+  word_count: number
+  status: 'uploaded' | 'ocr_processing' | 'ocr_done' | 'analyzing' | 'analyzed' | 'failed'
+  ocr_result: any | null
+  analysis: EssayAnalysis | null
+  error_message: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type Mistake = {
   id: number
   subject: string
@@ -367,6 +400,55 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ prompt }),
     }),
+
+  // 作文管理
+  listEssays: async (params: {
+    essay_type?: string; topic?: string; q?: string
+    limit?: number; offset?: number
+  } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.essay_type) qs.set('essay_type', params.essay_type)
+    if (params.topic) qs.set('topic', params.topic)
+    if (params.q) qs.set('q', params.q)
+    qs.set('limit', String(params.limit ?? 50))
+    qs.set('offset', String(params.offset ?? 0))
+    const res = await fetch(`/api/essays?${qs}`, { credentials: 'include' })
+    if (!res.ok) throw new ApiError(res.status, await res.text())
+    const items: Essay[] = await res.json()
+    const total = parseInt(res.headers.get('X-Total-Count') || '0', 10)
+    return { items, total }
+  },
+  getEssay: (id: number) => request<Essay>(`/essays/${id}`),
+  createEssayFromText: (data: {
+    content: string; title?: string; essay_type?: string; topic?: string
+  }) =>
+    request<Essay>('/essays', { method: 'POST', body: JSON.stringify(data) }),
+  uploadEssayFile: async (
+    file: File,
+    sourceType: 'photo' | 'document',
+    opts?: { title?: string; essay_type?: string; topic?: string }
+  ) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('source_type', sourceType)
+    if (opts?.title) fd.append('title', opts.title)
+    if (opts?.essay_type) fd.append('essay_type', opts.essay_type)
+    if (opts?.topic) fd.append('topic', opts.topic)
+    const res = await fetch('/api/essays', {
+      method: 'POST', credentials: 'include', body: fd,
+    })
+    if (!res.ok) throw new ApiError(res.status, await res.text())
+    return res.json() as Promise<Essay>
+  },
+  updateEssay: (id: number, data: Partial<Pick<Essay, 'title' | 'essay_type' | 'topic' | 'content'>>) =>
+    request<Essay>(`/essays/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteEssay: (id: number) =>
+    request<{ ok: boolean }>(`/essays/${id}`, { method: 'DELETE' }),
+  triggerEssayOcr: (id: number) =>
+    request<Essay>(`/essays/${id}/ocr`, { method: 'POST' }),
+  triggerEssayAnalysis: (id: number) =>
+    request<Essay>(`/essays/${id}/analyze`, { method: 'POST' }),
+  listEssayTopics: () => request<string[]>('/essays/topics'),
 
   // Reflections (她的声音 — 永远不喂给 AI)
   listReflections: (params: {

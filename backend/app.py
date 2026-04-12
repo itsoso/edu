@@ -38,6 +38,7 @@ from routes.admin_stats import bp as admin_stats_bp
 from routes.reflections import bp as reflections_bp
 from routes.goals import bp as goals_bp
 from routes.journal_media import bp as journal_media_bp
+from routes.essays import bp as essays_bp
 
 
 def create_app() -> Flask:
@@ -67,7 +68,8 @@ def create_app() -> Flask:
     # 注册 blueprints
     for bp in (auth_bp, exams_bp, tasks_bp, mistakes_bp,
                uploads_bp, practice_bp, reports_bp, content_bp,
-               admin_stats_bp, reflections_bp, goals_bp, journal_media_bp):
+               admin_stats_bp, reflections_bp, goals_bp, journal_media_bp,
+               essays_bp):
         app.register_blueprint(bp)
 
     # 启动后台清理 daemon (30 天前的试卷原图). 幂等, 多 worker 每个进程自己起.

@@ -302,6 +302,31 @@ CREATE TABLE IF NOT EXISTS journal_media (
 
 CREATE INDEX IF NOT EXISTS idx_journal_media_owner ON journal_media(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_journal_media_refl  ON journal_media(reflection_id);
+
+-- 作文管理
+CREATE TABLE IF NOT EXISTS essays (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL,
+    title           TEXT,
+    content         TEXT    NOT NULL DEFAULT '',
+    source_type     TEXT    NOT NULL,              -- 'photo'|'document'|'text'
+    file_path       TEXT,
+    file_name       TEXT,
+    essay_type      TEXT,                          -- '记叙文'|'议论文'|'说明文'|'应用文'
+    topic           TEXT,
+    word_count      INTEGER DEFAULT 0,
+    status          TEXT    DEFAULT 'uploaded',    -- uploaded|ocr_processing|ocr_done|analyzing|analyzed|failed
+    ocr_result_json TEXT,
+    analysis_json   TEXT,
+    error_message   TEXT,
+    created_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_essays_owner    ON essays(owner_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_essays_type     ON essays(owner_user_id, essay_type);
+CREATE INDEX IF NOT EXISTS idx_essays_topic    ON essays(owner_user_id, topic);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_owner    ON llm_calls(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_date     ON llm_calls(created_at DESC);
 """
