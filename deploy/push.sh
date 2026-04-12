@@ -57,8 +57,8 @@ $SSH "cd $REMOTE_DIR && ./venv/bin/pip install -r backend/requirements.txt --qui
 ok "python deps up to date"
 
 # ---------------------------------------------------------------
-step "3/5 remote: npm run build"
-$SSH "cd $REMOTE_DIR/frontend && npm run build 2>&1 | tail -8"
+step "3/5 remote: npm install + build"
+$SSH "cd $REMOTE_DIR/frontend && npm install --silent 2>&1 | tail -3 && npm run build 2>&1 | tail -8"
 ok "frontend built"
 
 # ---------------------------------------------------------------
