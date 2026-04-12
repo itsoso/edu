@@ -175,6 +175,24 @@ export type Reflection = {
   updated_at: string
 }
 
+export type JournalMedia = {
+  id: number
+  owner_user_id: number
+  reflection_id: number | null
+  media_type: 'audio' | 'video'
+  file_url: string
+  file_name: string | null
+  mime_type: string | null
+  duration_secs: number | null
+  file_size_bytes: number | null
+  ai_opt_in: boolean
+  analysis_status: 'none' | 'extracting_frames' | 'analyzing' | 'done' | 'failed'
+  analysis: any | null
+  analysis_prompt: string | null
+  error_message: string | null
+  created_at: string
+}
+
 export type Mistake = {
   id: number
   subject: string
@@ -315,6 +333,39 @@ export const api = {
     request<{ ok: boolean }>(`/mistakes/${id}`, { method: 'DELETE' }),
   mistakeStats: () =>
     request<{ by_reason: any[]; by_subject: any[] }>('/mistakes/stats'),
+
+  // Journal Media (音频/视频)
+  uploadJournalMedia: async (
+    file: File,
+    mediaType: 'audio' | 'video',
+    opts?: { durationSecs?: number; reflectionId?: number }
+  ) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('media_type', mediaType)
+    if (opts?.durationSecs) fd.append('duration_secs', String(opts.durationSecs))
+    if (opts?.reflectionId) fd.append('reflection_id', String(opts.reflectionId))
+    const res = await fetch('/api/journal/media', {
+      method: 'POST',
+      credentials: 'include',
+      body: fd,
+    })
+    if (!res.ok) throw new ApiError(res.status, await res.text())
+    return res.json() as Promise<JournalMedia>
+  },
+  listJournalMedia: (reflectionId?: number) =>
+    request<JournalMedia[]>(
+      `/journal/media${reflectionId ? '?reflection_id=' + reflectionId : ''}`
+    ),
+  getJournalMedia: (id: number) =>
+    request<JournalMedia>(`/journal/media/${id}`),
+  deleteJournalMedia: (id: number) =>
+    request<{ ok: boolean }>(`/journal/media/${id}`, { method: 'DELETE' }),
+  analyzeJournalMedia: (id: number, prompt: string) =>
+    request<JournalMedia>(`/journal/media/${id}/analyze`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    }),
 
   // Reflections (她的声音 — 永远不喂给 AI)
   listReflections: (params: {

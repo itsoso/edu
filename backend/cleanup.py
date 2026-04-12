@@ -60,11 +60,54 @@ def cleanup_old_upload_files() -> dict:
     return {"removed": removed, "skipped": skipped, "errors": errors}
 
 
+JOURNAL_MEDIA_RETENTION_DAYS = 14  # 音视频保留 14 天 (比图片短, 因为更大)
+
+
+def cleanup_old_journal_media() -> dict:
+    """删除 retention 天前的 journal 音视频文件 + 提取帧."""
+    from constants import JOURNAL_UPLOAD_DIR
+    import shutil
+
+    removed = 0
+    errors = 0
+
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT id, file_path, owner_user_id FROM journal_media
+               WHERE file_path IS NOT NULL
+                 AND date(created_at) < date('now', ?)""",
+            (f"-{JOURNAL_MEDIA_RETENTION_DAYS} day",),
+        ).fetchall()
+
+    for row in rows:
+        rel = row["file_path"]
+        uid = rel.rsplit(".", 1)[0].split("/")[-1] if rel else ""
+        p = JOURNAL_UPLOAD_DIR / rel
+        try:
+            if p.exists():
+                p.unlink()
+                removed += 1
+            # 也删帧目录
+            frames_dir = JOURNAL_UPLOAD_DIR / str(row["owner_user_id"]) / "frames" / uid
+            if frames_dir.exists():
+                shutil.rmtree(frames_dir, ignore_errors=True)
+        except Exception:
+            logger.exception("cleanup: failed to delete journal media %s", p)
+            errors += 1
+
+    logger.info(
+        "journal media cleanup: %d removed, %d errors (retention=%d days)",
+        removed, errors, JOURNAL_MEDIA_RETENTION_DAYS,
+    )
+    return {"removed": removed, "errors": errors}
+
+
 def _cleanup_loop():
     """后台 daemon 主循环."""
     while True:
         try:
             cleanup_old_upload_files()
+            cleanup_old_journal_media()
         except Exception:
             logger.exception("cleanup loop iteration failed")
         time.sleep(CLEANUP_INTERVAL_SECONDS)

@@ -119,6 +119,32 @@ CREATE TABLE IF NOT EXISTS practice_sets (
     FOREIGN KEY (source_mistake_id) REFERENCES mistakes(id)  ON DELETE SET NULL
 );
 
+-- 家长"窥视"日志: 家长每次主动展开孩子数据时记录一次 (家长独立线)
+-- 设计理由: 把家长从"被动监控者"转成"自觉观察者".
+-- 月末告诉家长"你这个月展开了 X 次" — 让他/她自己看到参与度.
+-- 这不是惩罚, 是反馈循环.
+CREATE TABLE IF NOT EXISTS parent_views (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_user_id  INTEGER NOT NULL,              -- 家长 user.id
+    student_id      INTEGER NOT NULL,              -- 他看的学生 user.id (冗余, 便于查询)
+    view_type       TEXT    NOT NULL,              -- 'exams'|'mistakes'|'tasks'|'calendar'|'journal_stats'|'any'
+    created_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (parent_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (student_id)     REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- 家长沉默周: 家长自己设置的本周不看承诺
+-- 这是"家长为自己练习退出机制"的工具
+CREATE TABLE IF NOT EXISTS parent_silent_weeks (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_user_id  INTEGER NOT NULL,
+    week_start      TEXT    NOT NULL,              -- YYYY-MM-DD (周一)
+    note            TEXT,                           -- 可选: 他/她想对自己说的一句话
+    created_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(parent_user_id, week_start),
+    FOREIGN KEY (parent_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- 周目标: 她每周一主动设定的学习目标 (阶段 3)
 -- 设计理由: 元学习的核心是"识别自己当下该学什么".
 -- 没有 goal 时系统不强塞, 让她感受到选择的空间.
@@ -247,6 +273,34 @@ CREATE INDEX IF NOT EXISTS idx_reflections_related ON reflections(owner_user_id,
 CREATE INDEX IF NOT EXISTS idx_reflections_rkey    ON reflections(owner_user_id, kind, related_key);
 CREATE INDEX IF NOT EXISTS idx_weekly_goals_owner   ON weekly_goals(owner_user_id, week_start DESC);
 CREATE INDEX IF NOT EXISTS idx_task_overrides_week  ON task_overrides(owner_user_id, week_start);
+CREATE INDEX IF NOT EXISTS idx_parent_views_parent  ON parent_views(parent_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_parent_silent_parent ON parent_silent_weeks(parent_user_id, week_start);
+
+-- Journal 多媒体: 音频/视频附件. 与 reflections 是独立信任边界.
+-- reflections.content 永远不喂 AI, 但 journal_media CAN be analyzed if ai_opt_in=1.
+CREATE TABLE IF NOT EXISTS journal_media (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL,
+    reflection_id   INTEGER,                      -- FK → reflections.id, nullable
+    media_type      TEXT    NOT NULL,              -- 'audio' | 'video'
+    file_path       TEXT    NOT NULL,              -- 相对 data/uploads/journal/
+    file_name       TEXT,
+    mime_type       TEXT,
+    duration_secs   INTEGER,
+    file_size_bytes INTEGER,
+    ai_opt_in       INTEGER DEFAULT 0,            -- 0=私密, 1=用户显式同意 AI 分析
+    analysis_status TEXT    DEFAULT 'none',        -- none|extracting_frames|analyzing|done|failed
+    frames_json     TEXT,                          -- JSON: 提取的帧文件路径
+    analysis_json   TEXT,                          -- LLM 分析结果
+    analysis_prompt TEXT,                          -- 用户的提问
+    error_message   TEXT,
+    created_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id)  REFERENCES users(id)       ON DELETE CASCADE,
+    FOREIGN KEY (reflection_id)  REFERENCES reflections(id)  ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_journal_media_owner ON journal_media(owner_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_journal_media_refl  ON journal_media(reflection_id);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_owner    ON llm_calls(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_date     ON llm_calls(created_at DESC);
 """

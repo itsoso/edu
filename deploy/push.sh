@@ -62,12 +62,18 @@ $SSH "cd $REMOTE_DIR/frontend && npm run build 2>&1 | tail -8"
 ok "frontend built"
 
 # ---------------------------------------------------------------
-step "4/5 remote: restart edu-backend (+ install logrotate if changed)"
+step "4/5 remote: restart edu-backend (+ install logrotate/ffmpeg if needed)"
 $SSH "
   # 只在文件不同时才更新 logrotate 配置
   if ! cmp -s $REMOTE_DIR/deploy/logrotate-edu.conf /etc/logrotate.d/edu 2>/dev/null; then
     cp $REMOTE_DIR/deploy/logrotate-edu.conf /etc/logrotate.d/edu
     echo '[logrotate] updated /etc/logrotate.d/edu'
+  fi
+  # ffmpeg (视频分析需要)
+  if ! command -v ffmpeg &>/dev/null; then
+    echo '[ffmpeg] installing...'
+    apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null 2>&1
+    echo '[ffmpeg] installed'
   fi
   # 证书健康检查脚本 → /etc/cron.d/edu-cert-check
   if ! grep -q 'cert-check.sh' /etc/cron.d/edu-cert-check 2>/dev/null; then
