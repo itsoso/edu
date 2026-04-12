@@ -35,13 +35,27 @@ def _set_to_dict(conn, s_row):
 @bp.get("/api/practice")
 @login_required
 def list_practice_sets():
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        limit, offset = 50, 0
+
     with db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM practice_sets WHERE owner_user_id = ? ORDER BY created_at DESC",
+        total = conn.execute(
+            "SELECT COUNT(*) FROM practice_sets WHERE owner_user_id = ?",
             (g.owner_id,),
+        ).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM practice_sets WHERE owner_user_id = ? "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (g.owner_id, limit, offset),
         ).fetchall()
         out = [_set_to_dict(conn, r) for r in rows]
-    return jsonify(out)
+    resp = jsonify(out)
+    resp.headers["X-Total-Count"] = str(total)
+    resp.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return resp
 
 
 @bp.get("/api/practice/<int:set_id>")

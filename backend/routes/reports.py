@@ -234,13 +234,27 @@ def _format_metrics_for_prompt(metrics: dict) -> dict:
 @bp.get("/api/reports/monthly")
 @login_required
 def list_monthly_reports():
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        limit, offset = 50, 0
+
     with db() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM monthly_reports WHERE owner_user_id = ?",
+            (g.owner_id,),
+        ).fetchone()[0]
         rows = conn.execute(
             """SELECT id, month, created_at FROM monthly_reports
-               WHERE owner_user_id = ? ORDER BY month DESC""",
-            (g.owner_id,),
+               WHERE owner_user_id = ? ORDER BY month DESC
+               LIMIT ? OFFSET ?""",
+            (g.owner_id, limit, offset),
         ).fetchall()
-    return jsonify(rows_to_dicts(rows))
+    resp = jsonify(rows_to_dicts(rows))
+    resp.headers["X-Total-Count"] = str(total)
+    resp.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return resp
 
 
 @bp.get("/api/reports/monthly/<month>")

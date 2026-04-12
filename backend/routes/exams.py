@@ -11,14 +11,25 @@ bp = Blueprint("exams", __name__)
 @bp.get("/api/exams")
 @login_required
 def list_exams():
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        limit, offset = 50, 0
+
     with db() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM exams WHERE owner_user_id = ?",
+            (g.owner_id,),
+        ).fetchone()[0]
         rows = conn.execute(
             """SELECT e.*, GROUP_CONCAT(s.subject || ':' || s.score, '|') AS scores_raw
                FROM exams e LEFT JOIN scores s ON s.exam_id = e.id
                WHERE e.owner_user_id = ?
                GROUP BY e.id
-               ORDER BY e.sort_order ASC, e.id ASC""",
-            (g.owner_id,),
+               ORDER BY e.sort_order ASC, e.id ASC
+               LIMIT ? OFFSET ?""",
+            (g.owner_id, limit, offset),
         ).fetchall()
     exams = []
     for r in rows:
@@ -35,7 +46,10 @@ def list_exams():
                         pass
         d["scores"] = score_map
         exams.append(d)
-    return jsonify(exams)
+    resp = jsonify(exams)
+    resp.headers["X-Total-Count"] = str(total)
+    resp.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return resp
 
 
 @bp.post("/api/exams")
@@ -99,19 +113,35 @@ def delete_exam(exam_id):
 @bp.get("/api/scores/trend")
 @login_required
 def scores_trend():
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        limit, offset = 50, 0
+
     with db() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM exams WHERE owner_user_id = ?",
+            (g.owner_id,),
+        ).fetchone()[0]
         exams = conn.execute(
             """SELECT id, exam_name, stage, total, grade_rank, sort_order
                FROM exams WHERE owner_user_id = ?
-               ORDER BY sort_order""",
-            (g.owner_id,),
+               ORDER BY sort_order
+               LIMIT ? OFFSET ?""",
+            (g.owner_id, limit, offset),
         ).fetchall()
-        scores = conn.execute(
-            """SELECT s.exam_id, s.subject, s.score, s.full_mark
-               FROM scores s JOIN exams e ON e.id = s.exam_id
-               WHERE e.owner_user_id = ?""",
-            (g.owner_id,),
-        ).fetchall()
+        exam_ids = [e["id"] for e in exams]
+        if exam_ids:
+            placeholders = ",".join("?" * len(exam_ids))
+            scores = conn.execute(
+                f"""SELECT s.exam_id, s.subject, s.score, s.full_mark
+                   FROM scores s
+                   WHERE s.exam_id IN ({placeholders})""",
+                exam_ids,
+            ).fetchall()
+        else:
+            scores = []
     by_exam = {}
     for s in scores:
         by_exam.setdefault(s["exam_id"], {})[s["subject"]] = {
@@ -127,4 +157,7 @@ def scores_trend():
             "grade_rank": e["grade_rank"],
             "subjects": by_exam.get(e["id"], {}),
         })
-    return jsonify(series)
+    resp = jsonify(series)
+    resp.headers["X-Total-Count"] = str(total)
+    resp.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return resp

@@ -99,12 +99,26 @@ def upload_exam_image():
 @bp.get("/api/uploads")
 @login_required
 def list_uploads():
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        limit, offset = 50, 0
+
     with db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM exam_uploads WHERE owner_user_id = ? ORDER BY created_at DESC",
+        total = conn.execute(
+            "SELECT COUNT(*) FROM exam_uploads WHERE owner_user_id = ?",
             (g.owner_id,),
+        ).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM exam_uploads WHERE owner_user_id = ? "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (g.owner_id, limit, offset),
         ).fetchall()
-    return jsonify([_upload_to_dict(r) for r in rows])
+    resp = jsonify([_upload_to_dict(r) for r in rows])
+    resp.headers["X-Total-Count"] = str(total)
+    resp.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return resp
 
 
 @bp.get("/api/uploads/<int:upload_id>")

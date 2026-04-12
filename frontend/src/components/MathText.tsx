@@ -1,15 +1,18 @@
 /**
  * MathText — 自动检测并渲染数学公式的文本组件.
  *
- * 处理逻辑:
- * 1. 检测 LaTeX 分隔符: $...$ 或 \(...\) → 行内公式
- * 2. 检测常见数学 Unicode: √, ², ³ 等 → 转成 LaTeX 再渲染
- * 3. 检测 AI 输出的伪数学: sqrt(xxx), x^2 等 → 转成 LaTeX
- * 4. 纯文本不做任何改动, 原样显示
+ * 策略:
+ * 1. 已有 $...$ LaTeX → 直接渲染
+ * 2. 检测"数学片段" → 贪婪匹配连续数学字符 → 包成 $...$
+ * 3. 纯中文/纯文本 → 不做任何处理
+ *
+ * "数学片段"定义:
+ *   以 √ / 字母 / 数字 / ( 开头, 后续包含运算符 (+−×÷=≤≥≠<>^)
+ *   或 √ / ² ³ 等数学标记的连续序列.
  *
  * 用法:
  *   <MathText text="若√(bx1-x2)+√(bx2-cx1)=0" />
- *   <MathText text="解方程: $2x+5=15$" />
+ *   <MathText text="bx²+(4b-3)x+3(b-3)=0" />
  */
 import { useMemo } from 'react'
 import katex from 'katex'
@@ -20,94 +23,148 @@ type Props = {
   className?: string
 }
 
-/**
- * 把常见的"伪数学"文本转成 LaTeX 包裹的混合内容.
- *
- * 策略:
- * - 如果已有 $...$ 分隔符, 直接用
- * - 如果有 √ / ² / ³ / ^, 尝试整段转 LaTeX
- * - 否则原样返回
- */
-function preprocessMath(raw: string): string {
-  // 已经有 LaTeX 分隔符, 不处理
-  if (raw.includes('$') || raw.includes('\\(')) return raw
+// 数学字符集: 能出现在数学表达式里的字符
+const MATH_CHARS = /[a-zA-Z0-9√²³⁴⁵⁶⁷⁸⁹⁰+\-*/=<>≤≥≠≈±×÷^_()\[\]{},.\s]/
+const MATH_SIGNAL = /[√²³⁴⁵⁶⁷⁸⁹⁰^=≤≥≠±×÷]/  // 表明"这是数学不是普通文字"的信号字符
 
-  // 没有数学符号, 不处理
-  if (!/[√²³⁴⁵⁶⁷⁸⁹⁰∑∫∞±×÷≤≥≠≈∈∉∪∩⊂⊃]/.test(raw) && !/\^|\bsqrt\b/.test(raw)) {
-    return raw
+/**
+ * 把含数学的文本拆成 [文本段, 数学段, 文本段, ...].
+ *
+ * 核心策略: 找到"数学信号字符" → 向左右扩展到连续数学字符的边界 → 整段标记为数学.
+ * 没有信号字符的纯字母数字不会被误判为数学.
+ */
+function splitMathSegments(raw: string): { text: string; isMath: boolean }[] {
+  // 如果已有 $...$ 分隔符, 用它
+  if (raw.includes('$')) {
+    return splitByDollar(raw)
   }
 
-  // 有数学符号 → 逐段转换
-  // 把 √(expr) 转成 $\sqrt{expr}$
-  let result = raw.replace(/√\(([^)]+)\)/g, (_, inner) => {
-    const latex = toLatex(inner)
-    return `$\\sqrt{${latex}}$`
-  })
-  // 独立的 √x → $\sqrt{x}$
-  result = result.replace(/√(\w+)/g, (_, inner) => `$\\sqrt{${inner}}$`)
+  // 没有任何数学信号, 纯文本
+  if (!MATH_SIGNAL.test(raw)) {
+    return [{ text: raw, isMath: false }]
+  }
 
-  // x² → $x^{2}$
+  // 找所有数学信号字符的位置, 向左右扩展
+  const isMathChar = new Array(raw.length).fill(false)
+
+  for (let i = 0; i < raw.length; i++) {
+    if (MATH_SIGNAL.test(raw[i])) {
+      // 标记这个位置及其左右连续的数学字符
+      isMathChar[i] = true
+      // 向左扩展
+      for (let j = i - 1; j >= 0; j--) {
+        if (MATH_CHARS.test(raw[j]) && !/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(raw[j])) {
+          isMathChar[j] = true
+        } else break
+      }
+      // 向右扩展
+      for (let j = i + 1; j < raw.length; j++) {
+        if (MATH_CHARS.test(raw[j]) && !/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(raw[j])) {
+          isMathChar[j] = true
+        } else break
+      }
+    }
+  }
+
+  // 合并连续段
+  const segments: { text: string; isMath: boolean }[] = []
+  let i = 0
+  while (i < raw.length) {
+    const math = isMathChar[i]
+    let j = i + 1
+    while (j < raw.length && isMathChar[j] === math) j++
+    const chunk = raw.slice(i, j).trim()
+    if (chunk) {
+      segments.push({ text: raw.slice(i, j), isMath: math })
+    } else {
+      segments.push({ text: raw.slice(i, j), isMath: false })
+    }
+    i = j
+  }
+  return segments
+}
+
+function splitByDollar(raw: string): { text: string; isMath: boolean }[] {
+  const segments: { text: string; isMath: boolean }[] = []
+  const regex = /\$([^$]+)\$/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(raw)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ text: raw.slice(lastIndex, match.index), isMath: false })
+    }
+    segments.push({ text: match[1], isMath: true })
+    lastIndex = regex.lastIndex
+  }
+  if (lastIndex < raw.length) {
+    segments.push({ text: raw.slice(lastIndex), isMath: false })
+  }
+  return segments
+}
+
+/**
+ * 把伪数学文本转成 LaTeX.
+ * √(expr) → \sqrt{expr}
+ * x1 → x_{1}
+ * ² → ^{2}
+ * bx² → bx^{2}
+ */
+function toLatex(expr: string): string {
+  let s = expr.trim()
+
+  // √(expr) → \sqrt{expr}  (支持中英文括号)
+  s = s.replace(/√[（(]([^)）]+)[)）]/g, (_, inner) => `\\sqrt{${toLatex(inner)}}`)
+  // 独立 √x → \sqrt{x}
+  s = s.replace(/√(\w+)/g, (_, inner) => `\\sqrt{${inner}}`)
+
+  // 上标 Unicode
   const superscripts: Record<string, string> = {
     '²': '2', '³': '3', '⁴': '4', '⁵': '5',
     '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁰': '0',
   }
   for (const [sup, num] of Object.entries(superscripts)) {
-    result = result.replace(new RegExp(`(\\w)${sup}`, 'g'), `$$$1^{${num}}$$`)
+    s = s.replace(new RegExp(sup, 'g'), `^{${num}}`)
   }
 
-  // sqrt(expr) → $\sqrt{expr}$
-  result = result.replace(/\bsqrt\(([^)]+)\)/gi, (_, inner) => {
-    const latex = toLatex(inner)
-    return `$\\sqrt{${latex}}$`
-  })
+  // 变量下标: x1 → x_{1}, 但不影响纯数字如 123
+  s = s.replace(/([a-zA-Z])(\d+)(?![}\d])/g, '$1_{$2}')
 
-  return result
-}
+  // ×→\times  ÷→\div  ≤→\leq  ≥→\geq  ≠→\neq  ±→\pm
+  s = s.replace(/×/g, '\\times ')
+  s = s.replace(/÷/g, '\\div ')
+  s = s.replace(/≤/g, '\\leq ')
+  s = s.replace(/≥/g, '\\geq ')
+  s = s.replace(/≠/g, '\\neq ')
+  s = s.replace(/±/g, '\\pm ')
+  s = s.replace(/≈/g, '\\approx ')
 
-/** 简单的表达式 → LaTeX 转换 (处理变量下标等) */
-function toLatex(expr: string): string {
-  let s = expr
-  // x1 → x_1, x2 → x_2 (单字母 + 数字 → 下标)
-  s = s.replace(/([a-zA-Z])(\d+)/g, '$1_{$2}')
-  // ** → ^
-  s = s.replace(/\*\*/g, '^')
   return s
 }
 
-/** 渲染混合内容: $...$围起来的部分用 KaTeX, 其余原样 */
-function renderMixed(text: string): (string | { html: string })[] {
-  const parts: (string | { html: string })[] = []
-  // 匹配 $...$ (非贪婪)
-  const regex = /\$([^$]+)\$/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index))
-    }
+function renderSegments(
+  segments: { text: string; isMath: boolean }[]
+): (string | { html: string })[] {
+  return segments.map((seg) => {
+    if (!seg.isMath) return seg.text
+    const latex = toLatex(seg.text)
     try {
-      const html = katex.renderToString(match[1], {
+      const html = katex.renderToString(latex, {
         throwOnError: false,
         displayMode: false,
       })
-      parts.push({ html })
+      return { html }
     } catch {
-      parts.push(match[0]) // KaTeX 解析失败, 原样显示
+      return seg.text
     }
-    lastIndex = regex.lastIndex
-  }
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex))
-  }
-  return parts
+  })
 }
 
 export default function MathText({ text, className }: Props) {
-  const processed = useMemo(() => preprocessMath(text), [text])
-  const parts = useMemo(() => renderMixed(processed), [processed])
+  const parts = useMemo(() => {
+    const segments = splitMathSegments(text)
+    return renderSegments(segments)
+  }, [text])
 
-  // 如果没有任何 KaTeX 部分, 纯文本渲染 (零开销)
   const hasMath = parts.some((p) => typeof p !== 'string')
   if (!hasMath) {
     return <span className={className}>{text}</span>

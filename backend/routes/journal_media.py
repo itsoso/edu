@@ -135,16 +135,32 @@ def upload_journal_media():
 @bp.get("/api/journal/media")
 @login_required
 def list_journal_media():
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        limit, offset = 50, 0
+
     reflection_id = request.args.get("reflection_id", type=int)
-    query = "SELECT * FROM journal_media WHERE owner_user_id = ?"
+    where = "owner_user_id = ?"
     args: list = [g.owner_id]
     if reflection_id is not None:
-        query += " AND reflection_id = ?"
+        where += " AND reflection_id = ?"
         args.append(reflection_id)
-    query += " ORDER BY created_at DESC"
+
     with db() as conn:
-        rows = conn.execute(query, args).fetchall()
-    return jsonify([_media_to_dict(r) for r in rows])
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM journal_media WHERE {where}", args
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT * FROM journal_media WHERE {where} "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            args + [limit, offset],
+        ).fetchall()
+    resp = jsonify([_media_to_dict(r) for r in rows])
+    resp.headers["X-Total-Count"] = str(total)
+    resp.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return resp
 
 
 @bp.get("/api/journal/media/<int:mid>")

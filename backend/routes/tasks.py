@@ -174,22 +174,33 @@ def delete_task_override(task_id):
 @bp.get("/api/checkins")
 @login_required
 def list_checkins():
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        limit, offset = 50, 0
+
     date_arg = request.args.get("date")
+    where = "t.owner_user_id = ?"
+    args: list = [g.owner_id]
+    if date_arg:
+        where += " AND c.checkin_date = ?"
+        args.append(date_arg)
+
     with db() as conn:
-        if date_arg:
-            rows = conn.execute(
-                """SELECT c.* FROM checkins c JOIN tasks t ON c.task_id = t.id
-                   WHERE t.owner_user_id = ? AND c.checkin_date = ?""",
-                (g.owner_id, date_arg),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """SELECT c.* FROM checkins c JOIN tasks t ON c.task_id = t.id
-                   WHERE t.owner_user_id = ?
-                   ORDER BY c.checkin_date DESC""",
-                (g.owner_id,),
-            ).fetchall()
-    return jsonify(rows_to_dicts(rows))
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM checkins c JOIN tasks t ON c.task_id = t.id "
+            f"WHERE {where}", args
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT c.* FROM checkins c JOIN tasks t ON c.task_id = t.id "
+            f"WHERE {where} ORDER BY c.checkin_date DESC LIMIT ? OFFSET ?",
+            args + [limit, offset],
+        ).fetchall()
+    resp = jsonify(rows_to_dicts(rows))
+    resp.headers["X-Total-Count"] = str(total)
+    resp.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return resp
 
 
 @bp.post("/api/checkins")
@@ -230,7 +241,19 @@ def upsert_checkin():
 @bp.get("/api/checkins/stats")
 @login_required
 def checkins_stats():
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        limit, offset = 50, 0
+
     with db() as conn:
+        total = conn.execute(
+            """SELECT COUNT(DISTINCT c.checkin_date)
+               FROM checkins c JOIN tasks t ON c.task_id = t.id
+               WHERE t.owner_user_id = ? AND c.completed = 1""",
+            (g.owner_id,),
+        ).fetchone()[0]
         rows = conn.execute(
             """SELECT c.checkin_date AS date,
                       COUNT(*) AS done,
@@ -238,10 +261,14 @@ def checkins_stats():
                FROM checkins c JOIN tasks t ON c.task_id = t.id
                WHERE t.owner_user_id = ? AND c.completed = 1
                GROUP BY c.checkin_date
-               ORDER BY c.checkin_date DESC""",
-            (g.owner_id,),
+               ORDER BY c.checkin_date DESC
+               LIMIT ? OFFSET ?""",
+            (g.owner_id, limit, offset),
         ).fetchall()
-    return jsonify(rows_to_dicts(rows))
+    resp = jsonify(rows_to_dicts(rows))
+    resp.headers["X-Total-Count"] = str(total)
+    resp.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return resp
 
 
 # ---------- Dashboard 汇总 ----------
