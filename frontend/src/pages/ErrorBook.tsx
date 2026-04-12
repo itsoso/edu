@@ -4,6 +4,7 @@ import { api, Mistake } from '../api'
 import { useToast } from '../components/Toast'
 import EmptyState from '../components/EmptyState'
 import ReflectionField from '../components/ReflectionField'
+import MathText from '../components/MathText'
 
 const SUBJECTS = ['数学', '科学', '英语', '语文', '社会']
 const REASONS = ['计算错', '审题漏', '不会做', '步骤乱', '知识遗忘', '其他']
@@ -316,7 +317,11 @@ export default function ErrorBook() {
                       <span className="text-xs text-green-600">✓ 已掌握</span>
                     ) : null}
                   </div>
-                  {m.question_text && <p className="text-sm mb-1">{m.question_text}</p>}
+                  {m.question_text && (
+                    <p className="text-sm mb-1">
+                      <MathText text={m.question_text} />
+                    </p>
+                  )}
                   {m.knowledge_point && (
                     <p className="text-xs text-slate-500">知识点: {m.knowledge_point}</p>
                   )}
@@ -324,13 +329,11 @@ export default function ErrorBook() {
                     <div className="text-xs text-slate-600 mt-2 space-y-0.5">
                       {m.wrong_answer && (
                         <div>
-                          错: <span className="text-red-500">{m.wrong_answer}</span>
+                          错: <span className="text-red-500"><MathText text={m.wrong_answer} /></span>
                         </div>
                       )}
                       {m.correct_answer && (
-                        <div>
-                          对: <span className="text-green-600">{m.correct_answer}</span>
-                        </div>
+                        <AnswerReveal label="对" answer={m.correct_answer} />
                       )}
                     </div>
                   )}
@@ -377,6 +380,28 @@ export default function ErrorBook() {
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+/** 答案默认隐藏, 点击才显示. 设计理由: 让她先自己想, 再看答案 — 预测错误是学习的原料. */
+function AnswerReveal({ label, answer }: { label: string; answer: string }) {
+  const [revealed, setRevealed] = useState(false)
+  return (
+    <div className="flex items-center gap-1">
+      <span>{label}:</span>
+      {revealed ? (
+        <span className="text-green-600">
+          <MathText text={answer} />
+        </span>
+      ) : (
+        <button
+          onClick={() => setRevealed(true)}
+          className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded hover:bg-slate-200 text-[11px]"
+        >
+          点击查看答案
+        </button>
+      )}
     </div>
   )
 }

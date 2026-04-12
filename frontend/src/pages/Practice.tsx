@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, PracticeSet, PracticeItem } from '../api'
 import { usePolling } from '../hooks/usePolling'
 import EmptyState from '../components/EmptyState'
+import MathText from '../components/MathText'
 
 export default function Practice() {
   const [sets, setSets] = useState<PracticeSet[]>([])
@@ -230,7 +231,9 @@ function ItemCard({
             </span>
           ))}
       </div>
-      <div className="text-sm leading-relaxed whitespace-pre-wrap">{item.question_text}</div>
+      <div className="text-sm leading-relaxed whitespace-pre-wrap">
+        <MathText text={item.question_text} />
+      </div>
 
       <textarea
         value={answer}
