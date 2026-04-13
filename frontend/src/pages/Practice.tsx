@@ -11,6 +11,7 @@ export default function Practice() {
   const [sets, setSets] = useState<PracticeSet[]>([])
   const [active, setActive] = useState<PracticeSet | null>(null)
   const [err, setErr] = useState('')
+  const [detailLoading, setDetailLoading] = useState(false)
   const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set())
   const [printOpen, setPrintOpen] = useState(false)
   const [printing, setPrinting] = useState(false)
@@ -21,23 +22,34 @@ export default function Practice() {
       setSets(data)
       if (active && !data.find((x) => x.id === active.id)) {
         setActive(null)
-      } else if (!active && data.length > 0) {
-        // 如果还没选中任何题集, 默认选第一个 (最新的)
-        const detail = await api.getPracticeSet(data[0].id)
-        setActive(detail)
+      } else if (active) {
+        const summary = data.find((x) => x.id === active.id)
+        if (summary) {
+          setActive((prev) => (prev ? { ...prev, ...summary } : prev))
+        }
+      } else if (data.length > 0) {
+        // 首屏先渲染列表, 详情异步加载, 避免页面被一整套题目阻塞。
+        void openSet(data[0].id, data[0])
       }
     } catch (e: any) {
       setErr(e.message || String(e))
     }
   }
 
-  async function openSet(id: number) {
+  async function openSet(id: number, summary?: PracticeSet) {
+    const base = summary || sets.find((set) => set.id === id)
+    if (base) {
+      setActive((prev) => (prev?.id === id ? { ...prev, ...base } : { ...base, items: [] }))
+    }
+    setDetailLoading(true)
     try {
       const detail = await api.getPracticeSet(id)
       setActive(detail)
       setSelectedItemIds(new Set())
     } catch (e: any) {
       setErr(e.message || String(e))
+    } finally {
+      setDetailLoading(false)
     }
   }
 
@@ -192,7 +204,7 @@ export default function Practice() {
                   </button>
                 </div>
               </div>
-              {active.status !== 'generating' && (
+              {active.status !== 'generating' && !detailLoading && (
                 <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                   <button
                     onClick={() => setSelectedItemIds(new Set(active.items.map((item) => item.id)))}
@@ -215,6 +227,12 @@ export default function Practice() {
                 </div>
               )}
 
+              {detailLoading && (
+                <div className="bg-white border border-slate-200 rounded-lg p-6 text-sm text-slate-500">
+                  正在加载这套训练题...
+                </div>
+              )}
+
               {active.status === 'failed' && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
                   生成失败: {active.error_message || '未知原因'}
@@ -224,7 +242,8 @@ export default function Practice() {
                 </div>
               )}
 
-              {active.status !== 'generating' &&
+              {!detailLoading &&
+                active.status !== 'generating' &&
                 active.items.map((it, idx) => (
                   <ItemCard
                     key={it.id}
