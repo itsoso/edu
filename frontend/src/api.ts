@@ -156,6 +156,9 @@ export type PracticeSet = {
   title: string
   subject: string | null
   knowledge_point: string | null
+  item_count?: number
+  graded_count?: number
+  correct_count?: number
   status?: 'generating' | 'done' | 'failed'
   error_message?: string | null
   created_at: string

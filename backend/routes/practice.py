@@ -32,6 +32,15 @@ def _set_to_dict(conn, s_row):
     return d
 
 
+def _set_summary_to_dict(s_row):
+    d = row_to_dict(s_row)
+    d["items"] = []
+    d["item_count"] = d.get("item_count") or 0
+    d["graded_count"] = d.get("graded_count") or 0
+    d["correct_count"] = d.get("correct_count") or 0
+    return d
+
+
 @bp.get("/api/practice")
 @login_required
 def list_practice_sets():
@@ -47,11 +56,19 @@ def list_practice_sets():
             (g.owner_id,),
         ).fetchone()[0]
         rows = conn.execute(
-            "SELECT * FROM practice_sets WHERE owner_user_id = ? "
-            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            """SELECT ps.*,
+                      COUNT(pi.id) AS item_count,
+                      SUM(CASE WHEN pi.is_correct IS NOT NULL THEN 1 ELSE 0 END) AS graded_count,
+                      SUM(CASE WHEN pi.is_correct = 1 THEN 1 ELSE 0 END) AS correct_count
+               FROM practice_sets ps
+               LEFT JOIN practice_items pi ON pi.set_id = ps.id
+               WHERE ps.owner_user_id = ?
+               GROUP BY ps.id
+               ORDER BY ps.created_at DESC
+               LIMIT ? OFFSET ?""",
             (g.owner_id, limit, offset),
         ).fetchall()
-        out = [_set_to_dict(conn, r) for r in rows]
+        out = [_set_summary_to_dict(r) for r in rows]
     resp = jsonify(out)
     resp.headers["X-Total-Count"] = str(total)
     resp.headers["Access-Control-Expose-Headers"] = "X-Total-Count"

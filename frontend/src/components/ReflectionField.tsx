@@ -57,21 +57,6 @@ export default function ReflectionField({
     }
   }, [expanded, loaded, kind, relatedId, relatedKey])
 
-  // 预览模式也要知道有没有内容 (显示一个 badge 提示)
-  useEffect(() => {
-    if (!collapsible || loaded) return
-    api
-      .listReflections({ kind, related_id: relatedId, related_key: relatedKey, limit: 1 })
-      .then((items) => {
-        if (items.length > 0) {
-          setContent(items[0].content)
-          setExisting(items[0])
-        }
-        setLoaded(true)
-      })
-      .catch(() => setLoaded(true))
-  }, [collapsible, loaded, kind, relatedId, relatedKey])
-
   // debounce 保存
   useEffect(() => {
     if (!loaded || !expanded) return

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, Mistake } from '../api'
+import { api, Mistake, PracticeSet } from '../api'
 import { useToast } from '../components/Toast'
 import EmptyState from '../components/EmptyState'
 import ReflectionField from '../components/ReflectionField'
 import MathText from '../components/MathText'
 import SolutionSteps from '../components/SolutionSteps'
+import PrintPanel, { type PrintPanelOptions } from '../components/PrintPanel'
+import { buildPrintablePayload, openPrintWindow } from '../print/printable'
 
 const SUBJECTS = ['数学', '科学', '英语', '语文', '社会']
 const REASONS = ['计算错', '审题漏', '不会做', '步骤乱', '知识遗忘', '其他']
@@ -44,9 +46,13 @@ export default function ErrorBook() {
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState<Form>({ ...empty })
   const [generatingId, setGeneratingId] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [practiceSummaries, setPracticeSummaries] = useState<PracticeSet[]>([])
+  const [printOpen, setPrintOpen] = useState(false)
+  const [printing, setPrinting] = useState(false)
 
   async function reload() {
-    const [pageResult, st] = await Promise.all([
+    const [pageResult, st, practice] = await Promise.all([
       api.listMistakesPaged({
         subject: filterSubject || undefined,
         mastered: filterStatus === '' ? undefined : (Number(filterStatus) as 0 | 1),
@@ -54,10 +60,13 @@ export default function ErrorBook() {
         offset: 0,
       }),
       api.mistakeStats(),
+      api.listPracticeSets(),
     ])
     setMistakes(pageResult.items)
     setTotal(pageResult.total)
     setStats(st)
+    setPracticeSummaries(practice)
+    setSelectedIds(new Set())
   }
 
   async function loadMore() {
@@ -117,6 +126,53 @@ export default function ErrorBook() {
     }
   }
 
+  function toggleSelected(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function handlePrint(options: PrintPanelOptions) {
+    const selectedMistakes =
+      options.scope === 'selected'
+        ? mistakes.filter((m) => selectedIds.has(m.id))
+        : mistakes
+
+    if (selectedMistakes.length === 0) {
+      toast.error('请先勾选要打印的题目')
+      return
+    }
+
+    setPrinting(true)
+    try {
+      let linkedPracticeSets: PracticeSet[] = []
+      if (options.includeLinkedPractice) {
+        const ids = new Set(selectedMistakes.map((m) => m.id))
+        const linked = practiceSummaries.filter(
+          (set) => set.source_mistake_id && ids.has(set.source_mistake_id) && set.status === 'done'
+        )
+        linkedPracticeSets = await Promise.all(linked.map((set) => api.getPracticeSet(set.id)))
+      }
+
+      const payload = buildPrintablePayload({
+        title: '错题与举一反三打印',
+        mode: options.mode,
+        includeSolutions: options.includeSolutions,
+        mistakes: selectedMistakes,
+        practiceSets: linkedPracticeSets,
+      })
+      openPrintWindow(payload)
+      setPrintOpen(false)
+    } catch (e: any) {
+      toast.error(e.message || String(e))
+    } finally {
+      setPrinting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -125,6 +181,12 @@ export default function ErrorBook() {
           <p className="text-slate-500 mt-1 text-sm">记录 → 归因 → 重做 → 标记掌握</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setPrintOpen(true)}
+            className="px-4 py-2 border border-slate-300 rounded hover:bg-slate-50 text-sm"
+          >
+            🖨️ 打印
+          </button>
           <Link
             to="/scan"
             className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm"
@@ -279,8 +341,18 @@ export default function ErrorBook() {
       {/* 列表 */}
       <div className="space-y-3">
         {total > 0 && (
-          <div className="text-xs text-slate-500">
-            共 {total} 道错题 · 当前显示 {mistakes.length}
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+            <span>共 {total} 道错题 · 当前显示 {mistakes.length}</span>
+            <button
+              onClick={() => setSelectedIds(new Set(mistakes.map((m) => m.id)))}
+              className="text-brand-600"
+            >
+              全选当前页
+            </button>
+            <button onClick={() => setSelectedIds(new Set())} className="text-slate-500">
+              清空勾选
+            </button>
+            <span>已勾选 {selectedIds.size} 题</span>
           </div>
         )}
         {mistakes.length === 0 ? (
@@ -305,6 +377,14 @@ export default function ErrorBook() {
               }`}
             >
               <div className="flex items-start justify-between gap-3">
+                <label className="mt-1 flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(m.id)}
+                    onChange={() => toggleSelected(m.id)}
+                    className="h-4 w-4"
+                  />
+                </label>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <span className="text-xs px-1.5 py-0.5 bg-brand-100 text-brand-700 rounded">
@@ -392,6 +472,17 @@ export default function ErrorBook() {
           </button>
         )}
       </div>
+      {printOpen && (
+        <PrintPanel
+          title="打印错题"
+          selectedCount={selectedIds.size}
+          totalCount={mistakes.length}
+          allowLinkedPractice
+          busy={printing}
+          onClose={() => setPrintOpen(false)}
+          onConfirm={handlePrint}
+        />
+      )}
     </div>
   )
 }

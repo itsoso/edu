@@ -4,23 +4,38 @@ import { usePolling } from '../hooks/usePolling'
 import EmptyState from '../components/EmptyState'
 import MathText from '../components/MathText'
 import SolutionSteps from '../components/SolutionSteps'
+import PrintPanel, { type PrintPanelOptions } from '../components/PrintPanel'
+import { buildPrintablePayload, openPrintWindow } from '../print/printable'
 
 export default function Practice() {
   const [sets, setSets] = useState<PracticeSet[]>([])
   const [active, setActive] = useState<PracticeSet | null>(null)
   const [err, setErr] = useState('')
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set())
+  const [printOpen, setPrintOpen] = useState(false)
+  const [printing, setPrinting] = useState(false)
 
   async function reload() {
     try {
       const data = await api.listPracticeSets()
       setSets(data)
-      if (active) {
-        const u = data.find((x) => x.id === active.id)
-        if (u) setActive(u)
-      } else if (data.length > 0) {
+      if (active && !data.find((x) => x.id === active.id)) {
+        setActive(null)
+      } else if (!active && data.length > 0) {
         // 如果还没选中任何题集, 默认选第一个 (最新的)
-        setActive(data[0])
+        const detail = await api.getPracticeSet(data[0].id)
+        setActive(detail)
       }
+    } catch (e: any) {
+      setErr(e.message || String(e))
+    }
+  }
+
+  async function openSet(id: number) {
+    try {
+      const detail = await api.getPracticeSet(id)
+      setActive(detail)
+      setSelectedItemIds(new Set())
     } catch (e: any) {
       setErr(e.message || String(e))
     }
@@ -54,6 +69,42 @@ export default function Practice() {
     reload()
   }
 
+  function toggleSelected(id: number) {
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function handlePrint(options: PrintPanelOptions) {
+    if (!active) return
+    const chosenItems =
+      options.scope === 'selected'
+        ? active.items.filter((item) => selectedItemIds.has(item.id))
+        : active.items
+    if (chosenItems.length === 0) {
+      setErr('请先勾选要打印的训练题')
+      return
+    }
+
+    setPrinting(true)
+    try {
+      const payload = buildPrintablePayload({
+        title: active.title,
+        mode: options.mode,
+        includeSolutions: options.includeSolutions,
+        mistakes: [],
+        practiceSets: [{ ...active, items: chosenItems }],
+      })
+      openPrintWindow(payload)
+      setPrintOpen(false)
+    } finally {
+      setPrinting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -80,14 +131,12 @@ export default function Practice() {
           ) : (
             <ul className="space-y-1">
               {sets.map((s) => {
-                const done = s.items.filter((i) => i.is_correct !== null).length
-                const correct = s.items.filter((i) => i.is_correct === 1).length
                 const gen = s.status === 'generating'
                 const failed = s.status === 'failed'
                 return (
                   <li key={s.id}>
                     <button
-                      onClick={() => setActive(s)}
+                      onClick={() => openSet(s.id)}
                       className={`w-full text-left px-3 py-2 rounded text-sm hover:bg-slate-50 ${
                         active?.id === s.id ? 'bg-brand-50 border border-brand-200' : ''
                       }`}
@@ -102,7 +151,7 @@ export default function Practice() {
                           ? 'AI 出题中...'
                           : failed
                           ? '生成失败'
-                          : `${s.items.length} 题 · 已做 ${done} · 对 ${correct}`}
+                          : `${s.item_count ?? 0} 题 · 已做 ${s.graded_count ?? 0} · 对 ${s.correct_count ?? 0}`}
                       </div>
                     </button>
                   </li>
@@ -128,13 +177,33 @@ export default function Practice() {
                     {active.subject} · {active.knowledge_point}
                   </div>
                 </div>
-                <button
-                  onClick={() => remove(active.id)}
-                  className="text-xs text-red-500 hover:text-red-700"
-                >
-                  删除
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPrintOpen(true)}
+                    className="rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-600"
+                  >
+                    🖨️ 打印
+                  </button>
+                  <button
+                    onClick={() => remove(active.id)}
+                    className="text-xs text-red-500 hover:text-red-700"
+                  >
+                    删除
+                  </button>
+                </div>
               </div>
+              {active.status !== 'generating' && (
+                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                  <button
+                    onClick={() => setSelectedItemIds(new Set(active.items.map((item) => item.id)))}
+                    className="text-brand-600"
+                  >
+                    全选当前题集
+                  </button>
+                  <button onClick={() => setSelectedItemIds(new Set())}>清空勾选</button>
+                  <span>已勾选 {selectedItemIds.size} 题</span>
+                </div>
+              )}
 
               {active.status === 'generating' && (
                 <div className="bg-brand-50 border border-brand-200 rounded-lg p-6 text-center">
@@ -161,6 +230,8 @@ export default function Practice() {
                     key={it.id}
                     index={idx}
                     item={it}
+                    selected={selectedItemIds.has(it.id)}
+                    onToggleSelected={() => toggleSelected(it.id)}
                     onGraded={(updated) => {
                       // 局部更新: 只替换这一条 item, 不重拉全集
                       setActive((prev) =>
@@ -173,11 +244,21 @@ export default function Practice() {
                             }
                           : prev
                       )
-                      // 同步侧栏的 done/correct 计数 (轻量刷一次 list)
+                      // 同步侧栏摘要计数
                       api.listPracticeSets().then(setSets).catch(() => {})
                     }}
                   />
                 ))}
+              {printOpen && active && (
+                <PrintPanel
+                  title="打印训练题"
+                  selectedCount={selectedItemIds.size}
+                  totalCount={active.items.length}
+                  busy={printing}
+                  onClose={() => setPrintOpen(false)}
+                  onConfirm={handlePrint}
+                />
+              )}
             </>
           )}
         </section>
@@ -187,8 +268,14 @@ export default function Practice() {
 }
 
 function ItemCard({
-  index, item, onGraded,
-}: { index: number; item: PracticeItem; onGraded: (updated: PracticeItem) => void }) {
+  index, item, selected, onToggleSelected, onGraded,
+}: {
+  index: number
+  item: PracticeItem
+  selected: boolean
+  onToggleSelected: () => void
+  onGraded: (updated: PracticeItem) => void
+}) {
   const [answer, setAnswer] = useState(item.student_answer || '')
   const [showSolution, setShowSolution] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -215,6 +302,7 @@ function ItemCard({
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-2">
       <div className="flex items-center gap-2 text-xs">
+        <input type="checkbox" checked={selected} onChange={onToggleSelected} className="h-4 w-4" />
         <span className="font-bold text-slate-600">第 {index + 1} 题</span>
         {item.difficulty && (
           <span className="px-1.5 py-0.5 bg-slate-100 rounded">
