@@ -13,6 +13,40 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+#root {
+  min-height: 100%;
+}
+
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+.app-shell {
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+.mobile-topbar {
+  padding-top: var(--safe-top);
+}
+
+.mobile-bottom-nav {
+  padding-bottom: var(--safe-bottom);
+}
+
+.main-shell {
+  padding-bottom: calc(5.5rem + var(--safe-bottom));
+}
+
+@media (min-width: 768px) {
+  .main-shell {
+    padding-bottom: 2rem;
+  }
+}
+
 .md-content h1 { @apply text-2xl font-bold mt-6 mb-3; }
 .md-content h2 { @apply text-xl font-bold mt-5 mb-2 text-brand-700; }
 .md-content h3 { @apply text-lg font-semibold mt-4 mb-2; }

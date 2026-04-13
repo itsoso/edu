@@ -35,3 +35,8 @@ npm-debug.log*
 
 # OS
 Thumbs.db
+
+# iOS / Capacitor
+frontend/ios/App/Pods/
+frontend/ios/App/build/
+*.xcworkspace/xcuserdata/

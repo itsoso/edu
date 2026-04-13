@@ -511,6 +511,51 @@ EDU_DOMAIN=edu.executor.life
 
 服务器上的用户数据永远只受管理员影响，部署流程碰不到。
 
+### iPad 主屏安装
+
+现在前端已经带了 PWA 安装元信息和基础离线壳缓存，孩子在 iPad 上可以直接这样用：
+
+1. 用 Safari 打开 [https://edu.executor.life](https://edu.executor.life)
+2. 点浏览器的“分享”
+3. 选“添加到主屏幕”
+4. 桌面会出现“学习系统”图标，之后会以接近 App 的全屏方式打开
+
+说明：
+
+- 首次登录、拍照上传、AI 识别仍然依赖在线后端
+- 离线时会显示离线提示页，不支持完整离线学习流程
+- 窄屏 / iPad 触控模式下，主功能已改为底部导航，“更多”里包含次级页面和退出登录
+
+### iOS App 壳工程
+
+仓库已接入 Capacitor，iOS 工程位于 [frontend/ios](/Users/liqiuhua/work/personal/edu/frontend/ios:1)。
+
+常用命令：
+
+```bash
+cd frontend
+npm install
+npm run build
+npm run ios:open
+```
+
+当前配置采用“远端站点壳模式”：
+
+- Capacitor 配置文件：[frontend/capacitor.config.ts](/Users/liqiuhua/work/personal/edu/frontend/capacitor.config.ts:1)
+- App 启动后直接加载 `https://edu.executor.life`
+- 这样可以沿用现有 session cookie、上传流程和后端接口，不必额外改鉴权
+
+要完成真正的 iOS 打包，还需要本机安装完整 Xcode，而不仅是 Command Line Tools：
+
+```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+cd frontend
+npx cap sync ios
+npx cap open ios
+```
+
+然后在 Xcode 中选择签名团队、真机或模拟器，才能继续 Archive / TestFlight / App Store 流程。
+
 ---
 
 ## 7. 设计要点
