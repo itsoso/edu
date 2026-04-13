@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: '学习系统',
   webDir: 'dist',
   server: {
-    url: 'https://YOUR_DOMAIN',
+    url: 'https://edu.executor.life',
     cleartext: false,
     allowNavigation: ['edu.executor.life'],
   },
