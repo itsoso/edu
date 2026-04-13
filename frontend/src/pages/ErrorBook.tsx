@@ -40,6 +40,8 @@ export default function ErrorBook() {
   const [mistakes, setMistakes] = useState<Mistake[]>([])
   const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
   const [stats, setStats] = useState<{ by_reason: any[]; by_subject: any[] }>({ by_reason: [], by_subject: [] })
   const [filterSubject, setFilterSubject] = useState<string>('')
   const [filterStatus, setFilterStatus] = useState<'' | '0' | '1'>('')
@@ -52,21 +54,29 @@ export default function ErrorBook() {
   const [printing, setPrinting] = useState(false)
 
   async function reload() {
-    const [pageResult, st, practice] = await Promise.all([
-      api.listMistakesPaged({
-        subject: filterSubject || undefined,
-        mastered: filterStatus === '' ? undefined : (Number(filterStatus) as 0 | 1),
-        limit: PAGE_SIZE,
-        offset: 0,
-      }),
-      api.mistakeStats(),
-      api.listPracticeSets(),
-    ])
-    setMistakes(pageResult.items)
-    setTotal(pageResult.total)
-    setStats(st)
-    setPracticeSummaries(practice)
-    setSelectedIds(new Set())
+    setLoading(true)
+    setErr('')
+    try {
+      const [pageResult, st, practiceResult] = await Promise.all([
+        api.listMistakesPaged({
+          subject: filterSubject || undefined,
+          mastered: filterStatus === '' ? undefined : (Number(filterStatus) as 0 | 1),
+          limit: PAGE_SIZE,
+          offset: 0,
+        }),
+        api.mistakeStats(),
+        api.listPracticeSets().catch(() => [] as PracticeSet[]),
+      ])
+      setMistakes(pageResult.items)
+      setTotal(pageResult.total)
+      setStats(st)
+      setPracticeSummaries(practiceResult)
+      setSelectedIds(new Set())
+    } catch (e: any) {
+      setErr(e.message || String(e))
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function loadMore() {
@@ -201,6 +211,8 @@ export default function ErrorBook() {
           </button>
         </div>
       </div>
+
+      {err && <div className="text-sm text-red-600">{err}</div>}
 
       {/* 统计 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -355,7 +367,11 @@ export default function ErrorBook() {
             <span>已勾选 {selectedIds.size} 题</span>
           </div>
         )}
-        {mistakes.length === 0 ? (
+        {loading ? (
+          <div className="bg-white border border-slate-200 rounded-lg p-6 text-sm text-slate-500">
+            正在加载错题本...
+          </div>
+        ) : mistakes.length === 0 ? (
           <EmptyState
             icon="📓"
             title="还没有错题记录"
