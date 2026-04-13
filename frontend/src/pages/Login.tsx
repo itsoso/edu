@@ -43,7 +43,7 @@ export default function Login() {
             className="w-full border border-slate-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="liyan"
+            placeholder="demo"
             autoFocus
           />
         </div>

@@ -14,11 +14,13 @@
 
 set -euo pipefail
 
-SERVER_HOST=${EDU_SERVER_HOST:-47.237.191.17}
-SERVER_PORT=${EDU_SERVER_PORT:-22222}
+# 以下值必须通过环境变量提供, 或在部署前修改.
+# 示例: EDU_SERVER_HOST=1.2.3.4 EDU_SERVER_PORT=22 ./deploy/push.sh
+SERVER_HOST=${EDU_SERVER_HOST:?'请设置 EDU_SERVER_HOST'}
+SERVER_PORT=${EDU_SERVER_PORT:-22}
 SERVER_USER=${EDU_SERVER_USER:-root}
 REMOTE_DIR=${EDU_REMOTE_DIR:-/opt/edu}
-DOMAIN=${EDU_DOMAIN:-edu.executor.life}
+DOMAIN=${EDU_DOMAIN:-example.com}
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 LOCAL_DIR=$(cd "$SCRIPT_DIR/.." && pwd)

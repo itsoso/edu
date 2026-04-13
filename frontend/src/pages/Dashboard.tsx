@@ -179,7 +179,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 今日任务 — 立言每天真正要做的事, 现在是头号主角 */}
+      {/* 今日任务 — 学生每天真正要做的事, 现在是头号主角 */}
       <div className="bg-white rounded-lg border border-slate-200 p-5" id="today-tasks">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold">今日任务</h2>

@@ -1,7 +1,7 @@
 """OpenClaw gateway client — vision + text, sync httpx.
 
 环境变量:
-    EDU_LLM_BASE_URL   default: https://bot.executor.life/v1
+    EDU_LLM_BASE_URL   通过 EDU_LLM_BASE_URL 环境变量配置
     EDU_LLM_API_KEY    required (or .env file)
     EDU_LLM_MODEL      default: openclaw
 """
@@ -14,8 +14,10 @@ from typing import Any
 import httpx
 from dotenv import load_dotenv
 
-DEFAULT_BASE_URL = "https://bot.executor.life/v1"
-DEFAULT_MODEL = "openclaw"
+# LLM 网关默认值. 生产环境通过 backend/data/.env 覆盖.
+# 支持任何 OpenAI 兼容 API (OpenAI / Azure / 本地 Ollama / 自建网关).
+DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_MODEL = "gpt-4o-mini"
 ENV_FILE = Path(__file__).parent / "data" / ".env"
 
 # 加载 .env. override=False 保证真实环境变量优先, 不被文件覆盖

@@ -22,7 +22,7 @@ if ! flock -n 9; then
     exit 0
 fi
 
-DOMAIN=${EDU_DOMAIN:-edu.executor.life}
+DOMAIN=${EDU_DOMAIN:-YOUR_DOMAIN}
 LOG=/var/log/edu/cert-check.log
 ALERTS=/var/log/edu/cert-alerts.log
 CERT=/etc/letsencrypt/live/$DOMAIN/cert.pem

@@ -1,6 +1,6 @@
 # 学习系统 (edu)
 
-> 🌐 线上地址：**https://edu.executor.life**
+> 🌐 线上地址：**https://YOUR_DOMAIN**
 
 多租户学业追踪 + AI 提升系统。学生打卡、家长看护、错题归因、试卷 AI 识别、基于错题的二次训练一体化。
 技术栈：**Flask + SQLite + React + TypeScript + Vite + Tailwind + OpenClaw 视觉大模型**。
@@ -26,7 +26,7 @@
 
 ### 2.1 首次使用 — 学生注册
 
-1. 打开 https://edu.executor.life
+1. 打开 https://YOUR_DOMAIN
 2. 点"**注册**" → 选 **🎓 我是学生**
 3. 填写用户名（如 `zhangsan`）、密码、昵称、当前阶段
 4. 提交后自动登录，侧边栏出现自己的名字
@@ -36,7 +36,7 @@
 
 ### 2.2 家长绑定学生
 
-1. 打开 https://edu.executor.life
+1. 打开 https://YOUR_DOMAIN
 2. 点"**注册**" → 选 **👨‍👩‍👧 我是家长**
 3. 填写自己的用户名/密码/昵称
 4. **绑定码**一栏输入孩子的 6 位 Join Code
@@ -47,8 +47,8 @@
 ### 2.3 种子账号（可直接登录体验）
 
 ```
-用户名: liyan
-密码:   liyan123
+用户名: demo
+密码:   demo1234
 ```
 
 这是内置账号，含 13 次初一到初二的历史成绩、完整 4 周计划、完整学业分析报告。
@@ -142,7 +142,7 @@
 | 前端 | React 18 + TypeScript + Vite + Tailwind CSS + React Router 6 + Recharts |
 | 后端 | Python 3.12 + Flask 3 + Flask-CORS + Werkzeug + httpx |
 | 数据库 | SQLite (单文件, 本地/服务器同款) |
-| AI 网关 | OpenClaw (`https://bot.executor.life/v1`) — OpenAI 兼容 vision + text |
+| AI 网关 | OpenClaw (`https://api.openai.com/v1`) — OpenAI 兼容 vision + text |
 | 认证 | Flask session cookie (HttpOnly + SameSite=Lax + Secure in prod) |
 | 生产部署 | Gunicorn 22 + systemd + Nginx 1.24 + Let's Encrypt |
 
@@ -150,7 +150,7 @@
 
 ```
           ┌──────────────────────────────────────────┐
-          │          https://edu.executor.life        │
+          │          https://YOUR_DOMAIN        │
           └────────────────────┬─────────────────────┘
                                │  HTTPS (Let's Encrypt)
                                ▼
@@ -196,8 +196,8 @@
                                                     ▼
                                     ┌──────────────────────────┐
                                     │  OpenClaw Gateway         │
-                                    │  https://bot.executor     │
-                                    │                .life/v1   │
+                                    │  https://YOUR_LLM_GATEWAY     │
+                                    │                   │
                                     │  OpenAI-compatible        │
                                     │  多模型路由 (GLM/Claude/…) │
                                     └──────────────────────────┘
@@ -359,7 +359,7 @@ edu/
 │   ├── auth.py                      注册/登录/装饰器/join_code
 │   ├── llm.py                       OpenClaw 视觉 LLM 客户端 + prompts
 │   ├── plan_template.py             4 周计划模板 (100 条任务)
-│   ├── seed.py                      种子: 立言账号 + 13 次考试
+│   ├── seed.py                      种子: 示例账号 + 样例考试
 │   ├── server.py                    supervisor 风格适配层
 │   ├── requirements.txt             flask/gunicorn/httpx/...
 │   └── data/                        运行时数据 (不入 git)
@@ -407,7 +407,7 @@ edu/
     ├── deploy.sh                    服务器上执行版 (git pull 版)
     ├── gunicorn.conf.py             workers × threads 配置
     ├── edu-backend.service          systemd unit
-    └── nginx-edu.executor.life.conf HTTPS + SPA + /api 代理
+    └── nginx-YOUR_DOMAIN.conf HTTPS + SPA + /api 代理
 ```
 
 ---
@@ -423,7 +423,7 @@ cd /Users/liqiuhua/work/personal/edu
 
 首次运行会自动：
 1. 初始化 SQLite (`backend/data/edu.db`)
-2. 灌入立言历史成绩 + 4 周计划
+2. 灌入示例考试成绩 + 4 周计划
 3. 安装前端依赖
 4. 启动后端 (`:5060`) + 前端 (`:5173`)
 
@@ -452,7 +452,7 @@ npm run dev             # Vite dev server
 本地默认不调用 AI（扫试卷会提示"AI 服务尚未配置"）。要在本地开发 AI 功能，在 `backend/data/.env` 创建：
 
 ```env
-EDU_LLM_BASE_URL=https://bot.executor.life/v1
+EDU_LLM_BASE_URL=https://api.openai.com/v1
 EDU_LLM_API_KEY=<your-openclaw-gateway-key>
 EDU_LLM_MODEL=openclaw
 ```
@@ -478,11 +478,11 @@ EDU_LLM_MODEL=openclaw
 
 环境变量可覆盖（默认指向已有服务器）：
 ```bash
-EDU_SERVER_HOST=47.237.191.17
-EDU_SERVER_PORT=22222
+EDU_SERVER_HOST=YOUR_SERVER_IP
+EDU_SERVER_PORT=YOUR_SSH_PORT
 EDU_SERVER_USER=root
 EDU_REMOTE_DIR=/opt/edu
-EDU_DOMAIN=edu.executor.life
+EDU_DOMAIN=YOUR_DOMAIN
 ```
 
 ### 服务器布局
@@ -496,8 +496,8 @@ EDU_DOMAIN=edu.executor.life
 | 用户上传 | `/opt/edu/backend/data/uploads/<uid>/` |
 | 前端构建 | `/opt/edu/frontend/dist/` |
 | systemd unit | `/etc/systemd/system/edu-backend.service` |
-| Nginx conf | `/etc/nginx/conf.d/edu.executor.life.conf` |
-| SSL 证书 | `/etc/letsencrypt/live/edu.executor.life/` |
+| Nginx conf | `/etc/nginx/conf.d/YOUR_DOMAIN.conf` |
+| SSL 证书 | `/etc/letsencrypt/live/YOUR_DOMAIN/` |
 | 应用日志 | `/var/log/edu/backend.{log,err}` · `journalctl -u edu-backend` |
 | 运行模式 | Gunicorn 22 (preload, N workers × 2 threads) 监听 `127.0.0.1:5060` |
 
@@ -515,7 +515,7 @@ EDU_DOMAIN=edu.executor.life
 
 现在前端已经带了 PWA 安装元信息和基础离线壳缓存，孩子在 iPad 上可以直接这样用：
 
-1. 用 Safari 打开 [https://edu.executor.life](https://edu.executor.life)
+1. 用 Safari 打开 [https://YOUR_DOMAIN](https://YOUR_DOMAIN)
 2. 点浏览器的“分享”
 3. 选“添加到主屏幕”
 4. 桌面会出现“学习系统”图标，之后会以接近 App 的全屏方式打开
@@ -542,7 +542,7 @@ npm run ios:open
 当前配置采用“远端站点壳模式”：
 
 - Capacitor 配置文件：[frontend/capacitor.config.ts](/Users/liqiuhua/work/personal/edu/frontend/capacitor.config.ts:1)
-- App 启动后直接加载 `https://edu.executor.life`
+- App 启动后直接加载 `https://YOUR_DOMAIN`
 - 这样可以沿用现有 session cookie、上传流程和后端接口，不必额外改鉴权
 
 要完成真正的 iOS 打包，还需要本机安装完整 Xcode，而不仅是 Command Line Tools：
@@ -587,7 +587,7 @@ python3 seed.py
 ### 服务器上看日志
 
 ```bash
-ssh -p 22222 root@47.237.191.17
+ssh -p YOUR_SSH_PORT root@YOUR_SERVER_IP
 
 # 应用层
 tail -f /var/log/edu/backend.log
@@ -612,7 +612,7 @@ nginx -s reload
 ### 备份数据库
 
 ```bash
-ssh -p 22222 root@47.237.191.17 "sqlite3 /opt/edu/backend/data/edu.db .dump" \
+ssh -p YOUR_SSH_PORT root@YOUR_SERVER_IP "sqlite3 /opt/edu/backend/data/edu.db .dump" \
     > edu-backup-$(date +%Y%m%d).sql
 ```
 
@@ -621,7 +621,7 @@ ssh -p 22222 root@47.237.191.17 "sqlite3 /opt/edu/backend/data/edu.db .dump" \
 Certbot 已装定时任务自动续签，手动触发：
 
 ```bash
-ssh -p 22222 root@47.237.191.17 "certbot renew && nginx -s reload"
+ssh -p YOUR_SSH_PORT root@YOUR_SERVER_IP "certbot renew && nginx -s reload"
 ```
 
 ---
@@ -640,7 +640,7 @@ ssh -p 22222 root@47.237.191.17 "certbot renew && nginx -s reload"
 
 ## 10. 许可与致谢
 
-- Repo: https://github.com/itsoso/edu (private)
-- 线上: https://edu.executor.life
-- 技术栈参考: `base.executor.life` (llms-board)
-- AI 网关: `https://bot.executor.life/v1` (OpenClaw)
+- Repo: https://github.com/YOUR_USERNAME/edu
+- 线上: https://YOUR_DOMAIN
+- 技术栈参考: `YOUR_DOMAIN` (llms-board)
+- AI 网关: `https://api.openai.com/v1` (OpenClaw)

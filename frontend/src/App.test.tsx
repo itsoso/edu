@@ -84,7 +84,7 @@ describe('App shell', () => {
       loading: false,
       user: {
         id: 1,
-        username: 'liyan',
+        username: 'demo',
         display_name: '李妍',
         role: 'student',
         student_id: null,

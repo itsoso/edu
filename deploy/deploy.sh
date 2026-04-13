@@ -4,7 +4,7 @@
 set -euo pipefail
 
 APP_DIR=/opt/edu
-DOMAIN=edu.executor.life
+DOMAIN=YOUR_DOMAIN
 NODE_BIN=$(command -v node || echo /usr/local/bin/node)
 
 echo "==> 1. pull latest"
@@ -41,8 +41,8 @@ systemctl daemon-reload
 systemctl enable edu-backend
 
 echo "==> 7. install nginx conf"
-cp deploy/nginx-edu.executor.life.conf /etc/nginx/sites-available/edu.executor.life.conf
-ln -sf /etc/nginx/sites-available/edu.executor.life.conf /etc/nginx/sites-enabled/edu.executor.life.conf
+cp deploy/nginx-YOUR_DOMAIN.conf /etc/nginx/sites-available/YOUR_DOMAIN.conf
+ln -sf /etc/nginx/sites-available/YOUR_DOMAIN.conf /etc/nginx/sites-enabled/YOUR_DOMAIN.conf
 
 echo "==> 8. (re)start backend"
 systemctl restart edu-backend

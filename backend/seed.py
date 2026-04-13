@@ -1,6 +1,7 @@
-"""Seed: 初始化 DB + 创建种子学生账号 (立言) + 灌入她的历史成绩.
+"""Seed: 初始化 DB + 创建示例学生账号 + 灌入样例考试数据.
 
-幂等: 如果 liyan 已存在, 清空其相关数据后重灌.
+开源版本: 使用虚构的示例数据, 不含真实学生信息.
+幂等: 如果 demo 已存在, 清空其相关数据后重灌.
 Run: python seed.py
 """
 from db import db, init_db
@@ -10,47 +11,49 @@ from plan_template import install_plan_for_student
 SUBJECTS = ["科学", "英语", "数学", "语文", "社会"]
 FULL_MARKS = {"科学": 150, "英语": 120, "数学": 120, "语文": 120, "社会": 100}
 
+# 示例考试数据 (虚构, 用于演示功能)
 # (sort_order, stage, exam_name, date, 科学, 英语, 数学, 语文, 社会, 总分, 班排, 年排, 备注)
-LIYAN_EXAMS = [
-    (1,  "初一上", "第一次月考",   None,         115,   111.5, 100,   88,    None, 414.5, 7,  41,  "少社会"),
-    (2,  "初一上", "期中考试",     None,         118,   107.5, 118,   104,   87,   534.5, 5,  51,  ""),
-    (3,  "初一上", "12月月考",     None,         105,   103.5, 105,   102,   86,   501.5, 15, 100, "低谷"),
-    (4,  "初一上", "上学期期末",   "2025-01-16", 113,   113,   117,   105,   87.5, 535.5, None, 68, ""),
-    (5,  "初一下", "3月月考",      "2025-03-21", 114,   110,   117,   106,   80,   527,   None, 67, ""),
-    (6,  "初一下", "期中考试",     None,         109,   111,   117,   108.5, 89,   534.5, None, 59, ""),
-    (7,  "初一下", "6月月考",      None,         None,  None,  None,  None,  None, 516.5, None, 89, "仅总分"),
-    (8,  "初一下", "下学期期末",   None,         115,   113,   116.5, 110,   85.5, 540,   None, 65, ""),
-    (9,  "初二上", "第一次月考",   None,         142,   110,   101,   105,   89,   547,   None, 57, "科学跳升"),
-    (10, "初二上", "期中考试",     None,         140,   111,   111,   105.5, 92,   559.5, None, 72, ""),
-    (11, "初二上", "12月月考",     None,         146,   109.5, 104,   101.5, 93,   554,   None, 64, ""),
-    (12, "初二上", "上学期期末",   None,         143,   119,   116,   103.5, 88.5, 570,   None, 51, "历史最高"),
-    (13, "初二下", "4月月考",      "2026-04-01", 143,   111,   106,   103.5, 95,   558.5, None, 48, "最新"),
+DEMO_EXAMS = [
+    (1,  "初一上", "第一次月考",   None,         110,   105,   95,    85,    None, 395,   10, 55,  ""),
+    (2,  "初一上", "期中考试",     None,         115,   108,   110,   100,   85,   518,   6,  42,  ""),
+    (3,  "初一上", "上学期期末",   "2025-01-15", 112,   112,   108,   102,   88,   522,   None, 45, ""),
+    (4,  "初一下", "期中考试",     None,         108,   110,   115,   106,   86,   525,   None, 50, ""),
+    (5,  "初一下", "下学期期末",   None,         114,   111,   112,   108,   87,   532,   None, 43, ""),
+    (6,  "初二上", "第一次月考",   None,         138,   109,   105,   103,   88,   543,   None, 48, ""),
+    (7,  "初二上", "期中考试",     None,         142,   112,   110,   105,   90,   559,   None, 38, ""),
+    (8,  "初二上", "上学期期末",   None,         140,   116,   113,   104,   91,   564,   None, 35, ""),
 ]
+
+# 示例学生 (虚构)
+DEMO_USERNAME = "demo"
+DEMO_PASSWORD = "demo1234"
+DEMO_DISPLAY_NAME = "示例学生"
+DEMO_STAGE = "初二下"
 
 
 def seed():
     init_db()
     with db() as conn:
         # 清理同名种子账号 (幂等)
-        existing = conn.execute("SELECT id FROM users WHERE username = ?", ("liyan",)).fetchone()
+        existing = conn.execute("SELECT id FROM users WHERE username = ?", (DEMO_USERNAME,)).fetchone()
         if existing:
             conn.execute("DELETE FROM users WHERE id = ?", (existing["id"],))
             # FK CASCADE 会自动清理 exams/tasks/mistakes
 
-        # 创建学生账号: liyan / liyan123
+        # 创建学生账号
         info = create_student(
             conn,
-            username="liyan",
-            password="liyan123",
-            display_name="潘立言",
-            stage="初二下",
+            username=DEMO_USERNAME,
+            password=DEMO_PASSWORD,
+            display_name=DEMO_DISPLAY_NAME,
+            stage=DEMO_STAGE,
         )
         student_id = info["id"]
-        print(f"Created student user 'liyan' (id={student_id}) join_code={info['join_code']}")
+        print(f"Created student user '{DEMO_USERNAME}' (id={student_id}) join_code={info['join_code']}")
 
-        # 灌历史考试
+        # 灌样例考试
         for (order, stage, name, date, kxue, eng, math, yuwen, shehui,
-             total, class_rank, grade_rank, notes) in LIYAN_EXAMS:
+             total, class_rank, grade_rank, notes) in DEMO_EXAMS:
             cur = conn.execute(
                 """INSERT INTO exams
                    (owner_user_id, exam_name, exam_date, stage, total,
@@ -73,8 +76,8 @@ def seed():
         # 灌 4 周计划
         install_plan_for_student(conn, student_id)
 
-    print(f"Seeded {len(LIYAN_EXAMS)} exams + 4-week plan tasks for liyan.")
-    print("Login: username=liyan  password=liyan123")
+    print(f"Seeded {len(DEMO_EXAMS)} exams + 4-week plan tasks for {DEMO_USERNAME}.")
+    print(f"Login: username={DEMO_USERNAME}  password={DEMO_PASSWORD}")
 
 
 if __name__ == "__main__":
