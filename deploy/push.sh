@@ -66,12 +66,9 @@ ok "frontend built"
 # ---------------------------------------------------------------
 step "4/5 remote: restart edu-backend (+ install logrotate/ffmpeg if needed)"
 $SSH "
-  # nginx 配置自动 diff 更新
-  if ! cmp -s $REMOTE_DIR/deploy/nginx-edu.executor.life.conf /etc/nginx/conf.d/edu.executor.life.conf 2>/dev/null; then
-    cp $REMOTE_DIR/deploy/nginx-edu.executor.life.conf /etc/nginx/conf.d/edu.executor.life.conf
-    nginx -t && nginx -s reload
-    echo '[nginx] updated + reloaded'
-  fi
+  # nginx: 仓库里是脱敏模板 (YOUR_DOMAIN), 不自动覆盖生产配置.
+  # 首次部署时手动复制并替换域名: cp deploy/nginx-*.conf /etc/nginx/conf.d/YOUR_DOMAIN.conf
+  # 后续部署只在手动要求时更新.
   # 只在文件不同时才更新 logrotate 配置
   if ! cmp -s $REMOTE_DIR/deploy/logrotate-edu.conf /etc/logrotate.d/edu 2>/dev/null; then
     cp $REMOTE_DIR/deploy/logrotate-edu.conf /etc/logrotate.d/edu
