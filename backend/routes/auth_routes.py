@@ -4,7 +4,7 @@ from flask import Blueprint, jsonify, request, abort, session, g
 from db import db
 from auth import (
     authenticate, create_student, create_parent,
-    load_current_user, public_user, login_required,
+    load_current_user, public_user, login_required, issue_token,
 )
 from plan_template import install_plan_for_student
 
@@ -67,6 +67,60 @@ def login():
 def logout():
     session.clear()
     return {"ok": True}
+
+
+@bp.post("/api/auth/token-login")
+def token_login():
+    """移动端 (React Native) 登录. 返回 bearer token, 不设 session cookie.
+
+    客户端用 Authorization: Bearer <token> 访问后续 API.
+    Token 有效期 30 天, 客户端应存在 expo-secure-store.
+    """
+    data = request.get_json(force=True) or {}
+    username = (data.get("username") or "").strip().lower()
+    password = data.get("password") or ""
+    with db() as conn:
+        user = authenticate(conn, username, password)
+    if not user:
+        return jsonify({"error": "invalid_credentials"}), 401
+    token = issue_token(user["id"])
+    return jsonify({"user": public_user(user), "token": token})
+
+
+@bp.post("/api/auth/token-register")
+def token_register():
+    """移动端注册, 成功后直接返回 token (等同 register + token-login)."""
+    data = request.get_json(force=True) or {}
+    role = data.get("role")
+    username = (data.get("username") or "").strip().lower()
+    password = data.get("password") or ""
+    display_name = (data.get("display_name") or "").strip()
+    if not username or not password or not display_name or role not in ("student", "parent"):
+        abort(400, "missing fields")
+    if len(password) < 6:
+        return jsonify({"error": "password_too_short"}), 400
+    try:
+        with db() as conn:
+            if role == "student":
+                info = create_student(
+                    conn, username, password, display_name,
+                    stage=data.get("stage"),
+                )
+                install_plan_for_student(conn, info["id"])
+                user_id = info["id"]
+            else:
+                code = (data.get("join_code") or "").strip().upper()
+                if not code:
+                    return jsonify({"error": "join_code_required"}), 400
+                info = create_parent(conn, username, password, display_name, code)
+                user_id = info["id"]
+            user_row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            from db import row_to_dict
+            user = row_to_dict(user_row)
+        token = issue_token(user_id)
+        return jsonify({"user": public_user(user), "token": token})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @bp.delete("/api/auth/me")

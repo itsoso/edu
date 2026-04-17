@@ -40,3 +40,12 @@ Thumbs.db
 frontend/ios/App/Pods/
 frontend/ios/App/build/
 *.xcworkspace/xcuserdata/
+
+# React Native / Expo (mobile/)
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/ios/build/
+mobile/android/build/
+mobile/android/app/build/
+mobile/*.log

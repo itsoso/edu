@@ -1,10 +1,19 @@
-"""Auth helpers: session-based login with werkzeug password hashing."""
+"""Auth helpers: session cookie (web) + bearer token (mobile).
+
+两种认证方式共存:
+- Web: Flask session cookie (HttpOnly, 同源)
+- Mobile (RN): Bearer token in Authorization header
+  - Token 生成: itsdangerous URLSafeTimedSerializer 签名 user_id
+  - 有效期: 30 天 (移动端不频繁重登)
+  - 客户端 (RN) 把 token 存在 expo-secure-store
+"""
 import os
 import secrets
 from functools import wraps
 from pathlib import Path
 from flask import session, jsonify, request, g
 from werkzeug.security import generate_password_hash, check_password_hash
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 from db import db, row_to_dict
 
@@ -78,7 +87,43 @@ def authenticate(conn, username: str, password: str):
     return row_to_dict(row)
 
 
+TOKEN_MAX_AGE_SECONDS = 30 * 24 * 3600  # 30 天
+TOKEN_SALT = "edu-mobile-token-v1"
+
+
+def _get_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(get_secret_key(), salt=TOKEN_SALT)
+
+
+def issue_token(user_id: int) -> str:
+    """为移动端签发 bearer token (有效期 30 天)."""
+    return _get_serializer().dumps({"uid": user_id})
+
+
+def verify_token(token: str) -> int | None:
+    """验证 bearer token, 返回 user_id 或 None."""
+    try:
+        data = _get_serializer().loads(token, max_age=TOKEN_MAX_AGE_SECONDS)
+        return data.get("uid") if isinstance(data, dict) else None
+    except (BadSignature, SignatureExpired):
+        return None
+
+
+def _extract_bearer_token() -> str | None:
+    """从 Authorization: Bearer <token> 头提取 token."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:].strip()
+    return None
+
+
 def get_current_user_id() -> int | None:
+    """优先 bearer token (移动端), 其次 session cookie (web)."""
+    token = _extract_bearer_token()
+    if token:
+        uid = verify_token(token)
+        if uid:
+            return uid
     return session.get("user_id")
 
 
