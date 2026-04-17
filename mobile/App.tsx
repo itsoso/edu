@@ -1,9 +1,8 @@
 import React from 'react'
-import { ActivityIndicator, View, StyleSheet } from 'react-native'
+import { ActivityIndicator, View, StyleSheet, StatusBar } from 'react-native'
 import { NavigationContainer } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
-import { StatusBar } from 'expo-status-bar'
 
 import { AuthProvider, useAuth } from './src/lib/auth'
 import LoginScreen from './src/screens/LoginScreen'
@@ -43,7 +42,7 @@ export default function App() {
     <SafeAreaProvider>
       <AuthProvider>
         <NavigationContainer>
-          <StatusBar style="dark" />
+          <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
           <Router />
         </NavigationContainer>
       </AuthProvider>

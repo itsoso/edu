@@ -1,7 +1,7 @@
 /**
  * AuthContext — 管理登录态 + token 持久化.
  *
- * 启动时从 SecureStore 拿 token, 调 /me 验证是否还有效.
+ * 启动时从 Keychain 拿 token, 调 /me 验证是否还有效.
  * Login/Register 后刷新 user 状态.
  */
 import React, { createContext, useContext, useEffect, useState } from 'react'

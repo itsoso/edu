@@ -1,45 +1,50 @@
 /**
- * API 客户端 — Bearer token 认证 (Mobile).
+ * API 客户端 — Bearer token 认证 (bare React Native, 无 Expo).
  *
  * Token 存储:
- * - 真机: expo-secure-store (Keychain on iOS, EncryptedSharedPreferences on Android)
- * - Expo Go 环境 fallback 到内存变量 (开发时每次启动要重登)
+ * - 生产: react-native-keychain (iOS Keychain / Android Keystore)
+ * - 降级: 内存变量 (防止 keychain 权限问题 crash)
  */
-import * as SecureStore from 'expo-secure-store'
-import Constants from 'expo-constants'
+import Keychain from 'react-native-keychain'
+import { API_BASE_URL } from './config'
 
 const TOKEN_KEY = 'edu_auth_token'
-const BASE_URL: string =
-  (Constants.expoConfig?.extra as any)?.apiBaseUrl || 'https://YOUR_DOMAIN'
+const TOKEN_SERVICE = 'life.executor.edu'
 
 let memoryToken: string | null = null
 
 export async function saveToken(token: string): Promise<void> {
   memoryToken = token
   try {
-    await SecureStore.setItemAsync(TOKEN_KEY, token)
+    await Keychain.setGenericPassword('edu', token, {
+      service: TOKEN_SERVICE,
+    })
   } catch {
-    // Expo Go on iOS/Android simulator sometimes can't use SecureStore.
-    // Memory fallback is fine for dev.
+    // Keychain 权限问题时降级到内存 (重启失效)
   }
 }
 
 export async function loadToken(): Promise<string | null> {
   if (memoryToken) return memoryToken
   try {
-    const t = await SecureStore.getItemAsync(TOKEN_KEY)
-    memoryToken = t
-    return t
+    const creds = await Keychain.getGenericPassword({ service: TOKEN_SERVICE })
+    if (creds) {
+      memoryToken = creds.password
+      return creds.password
+    }
   } catch {
-    return null
+    // ignore
   }
+  return null
 }
 
 export async function clearToken(): Promise<void> {
   memoryToken = null
   try {
-    await SecureStore.deleteItemAsync(TOKEN_KEY)
-  } catch {}
+    await Keychain.resetGenericPassword({ service: TOKEN_SERVICE })
+  } catch {
+    // ignore
+  }
 }
 
 export class ApiError extends Error {
@@ -65,7 +70,7 @@ async function request<T>(
   }
 
   const { skipAuth, ...fetchOpts } = opts
-  const res = await fetch(BASE_URL + path, { ...fetchOpts, headers })
+  const res = await fetch(API_BASE_URL + path, { ...fetchOpts, headers })
   if (!res.ok) {
     let msg = ''
     try {
@@ -110,7 +115,6 @@ export type Checkin = {
 
 // -------- API methods --------
 export const api = {
-  // Auth
   tokenLogin: async (username: string, password: string) => {
     const data = await request<{ user: User; token: string }>('/api/auth/token-login', {
       method: 'POST',
@@ -140,8 +144,6 @@ export const api = {
   logout: async () => {
     await clearToken()
   },
-
-  // Tasks / Checkins
   listTasks: (week?: number, day?: number) => {
     const qs = new URLSearchParams()
     if (week) qs.set('week', String(week))

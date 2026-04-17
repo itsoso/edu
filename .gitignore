@@ -41,11 +41,17 @@ frontend/ios/App/Pods/
 frontend/ios/App/build/
 *.xcworkspace/xcuserdata/
 
-# React Native / Expo (mobile/)
+# React Native (bare CLI, mobile/)
 mobile/node_modules/
-mobile/.expo/
-mobile/dist/
+mobile/ios/Pods/
 mobile/ios/build/
+mobile/ios/DerivedData/
+mobile/ios/*.xcworkspace/xcuserdata/
+mobile/ios/*.xcodeproj/xcuserdata/
+mobile/ios/*.xcodeproj/project.xcworkspace/xcuserdata/
 mobile/android/build/
 mobile/android/app/build/
+mobile/android/.gradle/
+mobile/android/local.properties
 mobile/*.log
+mobile/.metro-cache/
