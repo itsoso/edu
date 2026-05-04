@@ -257,6 +257,7 @@ export type Course = {
   pickup_note: string | null
   notes: string | null
   sort_order: number
+  specific_date: string | null
   created_at: string
   updated_at: string
 }
@@ -271,6 +272,7 @@ export type CourseInput = {
   pickup_note?: string | null
   notes?: string | null
   sort_order?: number
+  specific_date?: string | null
 }
 
 // ---------- API ----------

@@ -513,6 +513,8 @@ CREATE INDEX IF NOT EXISTS idx_guardian_owner_cat
 -- ====================== 课程日历: 家长接送用 ======================
 -- 每条 = 一个固定时段的课 (如"周六 13:00-15:00 黄语文 213 教室").
 -- 家庭内可能多个孩子 (child_name 文本区分, 不引 users 表, 因为孩子不一定有账号).
+-- specific_date 非空时表示仅该日生效的"临时调课"(如五一假期补课),
+-- NULL 表示按 weekday 每周重复.
 CREATE TABLE IF NOT EXISTS courses (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id  INTEGER NOT NULL,
@@ -525,6 +527,7 @@ CREATE TABLE IF NOT EXISTS courses (
     pickup_note    TEXT,                          -- 接送备注 (谁送谁接, 几点出发)
     notes          TEXT,
     sort_order     INTEGER DEFAULT 0,
+    specific_date  TEXT,                          -- YYYY-MM-DD. 非空=单次课(临时调课), NULL=每周重复
     created_at     TEXT    DEFAULT CURRENT_TIMESTAMP,
     updated_at     TEXT    DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -532,6 +535,8 @@ CREATE TABLE IF NOT EXISTS courses (
 
 CREATE INDEX IF NOT EXISTS idx_courses_owner_day
     ON courses(owner_user_id, weekday, start_time);
+-- 注意: idx_courses_owner_date(specific_date) 在 _run_migrations 里建,
+-- 避免旧库升级时 SCHEMA 尝试建索引撞上还不存在的列.
 """
 
 
@@ -555,6 +560,13 @@ def db():
 def _column_exists(conn, table: str, col: str) -> bool:
     cur = conn.execute(f"PRAGMA table_info({table})")
     return any(r[1] == col for r in cur.fetchall())
+
+
+def _table_exists(conn, table: str) -> bool:
+    cur = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    )
+    return cur.fetchone() is not None
 
 
 def _run_migrations(conn):
@@ -616,6 +628,14 @@ def _run_migrations(conn):
         conn.execute("ALTER TABLE feynman_sessions ADD COLUMN manual_knowledge_point TEXT")
     if not _column_exists(conn, "feynman_sessions", "manual_source_note"):
         conn.execute("ALTER TABLE feynman_sessions ADD COLUMN manual_source_note TEXT")
+    # courses: 单次日期覆盖 (临时调课 / 假期补课). NULL=每周重复.
+    if _table_exists(conn, "courses"):
+        if not _column_exists(conn, "courses", "specific_date"):
+            conn.execute("ALTER TABLE courses ADD COLUMN specific_date TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_courses_owner_date "
+            "ON courses(owner_user_id, specific_date)"
+        )
 
 
 def init_db():

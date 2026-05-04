@@ -15,6 +15,7 @@ from auth import login_required
 bp = Blueprint("schedule", __name__)
 
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _validate_time(s):
@@ -41,6 +42,7 @@ def _payload(p):
     location = (p.get("location") or "").strip() or None
     pickup_note = (p.get("pickup_note") or "").strip() or None
     notes = (p.get("notes") or "").strip() or None
+    specific_date = (p.get("specific_date") or "").strip() or None
     try:
         sort_order = int(p.get("sort_order") or 0)
     except (TypeError, ValueError):
@@ -58,6 +60,8 @@ def _payload(p):
         return None, "invalid_end_time"
     if start_time >= end_time:
         return None, "end_before_start"
+    if specific_date and not DATE_RE.match(specific_date):
+        return None, "invalid_specific_date"
 
     return {
         "child_name": child_name,
@@ -69,6 +73,7 @@ def _payload(p):
         "pickup_note": pickup_note,
         "notes": notes,
         "sort_order": sort_order,
+        "specific_date": specific_date,
     }, None
 
 
@@ -77,6 +82,29 @@ def _payload(p):
 def list_courses():
     child = request.args.get("child")
     weekend_only = request.args.get("weekend") in ("1", "true", "yes")
+    on_date = request.args.get("on_date")  # YYYY-MM-DD, 返回当天有效的课 (recurring + specific_date 匹配)
+
+    if on_date and DATE_RE.match(on_date):
+        import datetime as _dt
+        try:
+            d = _dt.date.fromisoformat(on_date)
+        except ValueError:
+            return jsonify({"error": "invalid_on_date"}), 400
+        weekday = d.isoweekday()  # 1=Mon..7=Sun
+        sql = (
+            "SELECT * FROM courses WHERE owner_user_id = ? AND ("
+            "  specific_date = ? OR (specific_date IS NULL AND weekday = ?)"
+            ")"
+        )
+        args = [g.owner_id, on_date, weekday]
+        if child:
+            sql += " AND child_name = ?"
+            args.append(child)
+        sql += " ORDER BY start_time ASC, sort_order ASC, id ASC"
+        with db() as conn:
+            rows = conn.execute(sql, args).fetchall()
+        return jsonify(rows_to_dicts(rows))
+
     sql = "SELECT * FROM courses WHERE owner_user_id = ?"
     args = [g.owner_id]
     if child:
@@ -114,11 +142,12 @@ def create_course():
         cur = conn.execute(
             """INSERT INTO courses
                (owner_user_id, child_name, course_name, weekday, start_time, end_time,
-                location, pickup_note, notes, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                location, pickup_note, notes, sort_order, specific_date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (g.owner_id, fields["child_name"], fields["course_name"], fields["weekday"],
              fields["start_time"], fields["end_time"], fields["location"],
-             fields["pickup_note"], fields["notes"], fields["sort_order"]),
+             fields["pickup_note"], fields["notes"], fields["sort_order"],
+             fields["specific_date"]),
         )
         row = conn.execute("SELECT * FROM courses WHERE id = ?", (cur.lastrowid,)).fetchone()
     return jsonify(row_to_dict(row))
@@ -144,12 +173,13 @@ def update_course(cid):
                  child_name = ?, course_name = ?, weekday = ?,
                  start_time = ?, end_time = ?, location = ?,
                  pickup_note = ?, notes = ?, sort_order = ?,
+                 specific_date = ?,
                  updated_at = CURRENT_TIMESTAMP
                WHERE id = ? AND owner_user_id = ?""",
             (fields["child_name"], fields["course_name"], fields["weekday"],
              fields["start_time"], fields["end_time"], fields["location"],
              fields["pickup_note"], fields["notes"], fields["sort_order"],
-             cid, g.owner_id),
+             fields["specific_date"], cid, g.owner_id),
         )
         updated = conn.execute("SELECT * FROM courses WHERE id = ?", (cid,)).fetchone()
     return jsonify(row_to_dict(updated))
