@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, CuratedItem } from '../api'
+import MathText from './MathText'
 
 const KIND_EMOJI: Record<CuratedItem['kind'], string> = {
   review_mistake: '🔁',
@@ -186,12 +187,12 @@ export default function CuratorBlock() {
                       {KIND_EMOJI[item.kind] || '✨'}
                     </span>
                     <div className="flex-1 font-bold text-slate-900 text-[15px] leading-snug">
-                      {item.title}
+                      <MathText text={item.title} />
                     </div>
                   </div>
                   {item.description && (
                     <div className="text-xs text-slate-500 leading-relaxed">
-                      {item.description}
+                      <MathText text={item.description} />
                     </div>
                   )}
                   {rationale && (
