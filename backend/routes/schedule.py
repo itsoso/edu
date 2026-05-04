@@ -205,12 +205,11 @@ def delete_course(cid):
 # 只导入到当前 owner; 若该 owner 已有同名孩子 + 同时段, 跳过该条.
 
 PANLIYAN_COURSES = [
-    # 潘立言 —— 周五
-    {"child_name": "潘立言", "course_name": "黄语文",
-     "weekday": 5, "start_time": "13:00", "end_time": "15:00", "location": "213"},
-    {"child_name": "潘立言", "course_name": "卓科学",
-     "weekday": 5, "start_time": "15:45", "end_time": "17:45", "location": "206"},
     # 潘立言 —— 周六
+    {"child_name": "潘立言", "course_name": "黄语文",
+     "weekday": 6, "start_time": "13:00", "end_time": "15:00", "location": "213"},
+    {"child_name": "潘立言", "course_name": "卓科学",
+     "weekday": 6, "start_time": "15:45", "end_time": "17:45", "location": "206"},
     {"child_name": "潘立言", "course_name": "线上数学",
      "weekday": 6, "start_time": "19:00", "end_time": "21:00", "location": "线上"},
     # 潘立言 —— 周日
