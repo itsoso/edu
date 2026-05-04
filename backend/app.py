@@ -39,6 +39,15 @@ from routes.reflections import bp as reflections_bp
 from routes.goals import bp as goals_bp
 from routes.journal_media import bp as journal_media_bp
 from routes.essays import bp as essays_bp
+from routes.signals import bp as signals_bp
+from routes.profile import bp as profile_bp
+from routes.agent import bp as agent_bp
+from routes.feynman import bp as feynman_bp
+from routes.reflector import bp as reflector_bp
+from routes.curator import bp as curator_bp
+from routes.coach import bp as coach_bp
+from routes.guardian import bp as guardian_bp
+from routes.schedule import bp as schedule_bp
 
 
 def create_app() -> Flask:
@@ -69,7 +78,8 @@ def create_app() -> Flask:
     for bp in (auth_bp, exams_bp, tasks_bp, mistakes_bp,
                uploads_bp, practice_bp, reports_bp, content_bp,
                admin_stats_bp, reflections_bp, goals_bp, journal_media_bp,
-               essays_bp):
+               essays_bp, signals_bp, profile_bp, agent_bp, feynman_bp,
+               reflector_bp, curator_bp, coach_bp, guardian_bp, schedule_bp):
         app.register_blueprint(bp)
 
     # 启动后台清理 daemon (30 天前的试卷原图). 幂等, 多 worker 每个进程自己起.

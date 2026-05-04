@@ -13,9 +13,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '../lib/auth'
 import { colors } from '../lib/theme'
+import { useResponsive } from '../lib/responsive'
 
 export default function LoginScreen({ navigation }: any) {
   const { login } = useAuth()
+  const { hPadding, maxContent } = useResponsive()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -45,8 +47,8 @@ export default function LoginScreen({ navigation }: any) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
-        <ScrollView contentContainerStyle={styles.scroll}>
-          <View style={styles.card}>
+        <ScrollView contentContainerStyle={[styles.scroll, { paddingHorizontal: hPadding }]}>
+          <View style={[styles.card, maxContent ? { maxWidth: 480, alignSelf: 'center', width: '100%' } : null]}>
             <Text style={styles.title}>学习系统</Text>
             <Text style={styles.subtitle}>学生 / 家长 登录</Text>
 

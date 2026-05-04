@@ -15,6 +15,7 @@ import EmptyState from '../components/EmptyState'
 import { useToast } from '../components/Toast'
 import MediaRecorderComponent from '../components/MediaRecorder'
 import MediaPlayer from '../components/MediaPlayer'
+import signals from '../lib/signals'
 
 type InputTab = 'text' | 'audio' | 'video'
 
@@ -73,6 +74,10 @@ export default function Journal() {
     setSaving(true)
     try {
       await api.upsertReflection({ kind: 'free_write', content })
+      signals.track('journal.write', {
+        related_table: 'reflections',
+        payload: { char_count: content.length },
+      })
       setNewContent('')
       toast.success('写下了')
       reload()

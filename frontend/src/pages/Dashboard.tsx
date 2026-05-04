@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, Task, Checkin } from '../api'
+import { api, Task, Checkin, AgentSuggestion } from '../api'
 import { useAuth } from '../auth'
 import { usePolling } from '../hooks/usePolling'
 import WeeklyGoalCeremony from '../components/WeeklyGoalCeremony'
+import TutorCard from '../components/TutorCard'
+import CuratorBlock from '../components/CuratorBlock'
+import GuardianAlerts from '../components/GuardianAlerts'
+import CoachWeekCard from '../components/CoachWeekCard'
+import WeekendCoursesCard from '../components/WeekendCoursesCard'
+import signals from '../lib/signals'
 
 function todayStr() {
   const d = new Date()
@@ -50,6 +56,7 @@ export default function Dashboard() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [tip, setTip] = useState<DailyTip | null>(null)
   const [tipOpen, setTipOpen] = useState(false)
+  const [suggestion, setSuggestion] = useState<AgentSuggestion | null>(null)
   const [week, setWeek] = useState(1)
   const [weekNote, setWeekNote] = useState('')
   const [weekNoteSaved, setWeekNoteSaved] = useState(false)
@@ -64,6 +71,18 @@ export default function Dashboard() {
     api.dashboardSummary().then(setSummary).catch(() => {})
     api.dailyTip().then(setTip).catch(() => {})
   }, [])
+
+  // Tutor Agent 主动建议 (家长不拉)
+  useEffect(() => {
+    if (isParent) return
+    api
+      .getTodaySuggestion()
+      .then((r) => {
+        if (r.exists && r.suggestion) setSuggestion(r.suggestion)
+        else setSuggestion(null)
+      })
+      .catch(() => {})
+  }, [isParent])
 
   // 加载本周笔记 (从 reflections 表)
   const [weekNoteLoaded, setWeekNoteLoaded] = useState(false)
@@ -125,10 +144,16 @@ export default function Dashboard() {
 
   async function toggle(task: Task) {
     const done = checkins.some((c) => c.task_id === task.id)
+    const completed = !done
     await api.upsertCheckin({
       task_id: task.id,
       checkin_date: today,
-      completed: !done,
+      completed,
+    })
+    signals.track('task.checkin.toggle', {
+      related_table: 'tasks',
+      related_id: task.id,
+      payload: { completed, hour_of_day: new Date().getHours() },
     })
     const updated = await api.listCheckins(today)
     setCheckins(updated)
@@ -155,8 +180,46 @@ export default function Dashboard() {
         </p>
       </div>
 
+      {/* P7 Guardian — 异常监控提示 */}
+      <GuardianAlerts />
+
+      {/* 周末课程接送安排 — 家长视角 */}
+      <WeekendCoursesCard />
+
+      {/* 🆕 P2: Tutor Agent 主动建议 — 显示在最顶部, 平静中性 */}
+      {suggestion && (
+        <TutorCard
+          suggestion={suggestion}
+          onResolved={() => setSuggestion(null)}
+        />
+      )}
+
+      {/* 今天值得做的 (Curator) */}
+      <CuratorBlock />
+
+      {/* P6 Coach — 周日 (dow=7) / 周一 (dow=1) 显示本周复盘预览 */}
+      {(dow === 7 || dow === 1) && <CoachWeekCard />}
+
       {/* 🆕 阶段 3: 周目标仪式 — 这周你最想攻克什么 */}
       <WeeklyGoalCeremony weekStart={weekOf} />
+
+      {/* 🆕 主动讲知识点 — "我今天学到了什么, 讲给 AI 同学听" */}
+      <Link
+        to="/feynman/new"
+        className="block rounded-lg border border-purple-200 bg-purple-50 p-4 text-sm text-purple-900 hover:bg-purple-100 transition"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="font-semibold">🎓 今天学了什么新知识?</div>
+            <div className="mt-0.5 text-xs text-purple-700">
+              讲给 AI 同学听,一两句话就够 — 讲完就知道自己是不是真的懂了。
+            </div>
+          </div>
+          <span className="shrink-0 rounded-full border border-purple-300 bg-white px-3 py-1 text-xs font-medium text-purple-700">
+            讲一个 →
+          </span>
+        </div>
+      </Link>
 
       {/* 🆕 本周我学到了什么 — 她自己的空间 */}
       <div className="bg-white rounded-lg border border-slate-200 p-5">
@@ -422,6 +485,16 @@ function ParentHome({ displayName, today }: { displayName: string; today: string
           你是 <span className="font-medium">{displayName}</span> 的家长视图
         </p>
       </div>
+
+      <GuardianAlerts />
+
+      {/* 周末课程接送安排 — 家长视角 */}
+      <WeekendCoursesCard />
+
+      {(() => {
+        const d = dowFromDate(new Date())
+        return d === 7 || d === 1 ? <CoachWeekCard /> : null
+      })()}
 
       {/* 默认状态: 一段安静的话, 不显示任何数据 */}
       <div className="bg-gradient-to-br from-slate-50 to-blue-50 border border-slate-200 rounded-lg p-6 md:p-8 space-y-4">

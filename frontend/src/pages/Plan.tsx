@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, Task, Checkin } from '../api'
 import { useToast } from '../components/Toast'
+import signals from '../lib/signals'
 
 const WEEK_THEMES: Record<number, { title: string; goal: string }> = {
   1: { title: '第 1 周 · 摸底与修复', goal: '找到数学失分规律' },
@@ -65,10 +66,16 @@ export default function Plan() {
       toast.info('这个任务本周已跳过. 先恢复默认才能打卡.')
       return
     }
+    const completed = !doneSet.has(t.id)
     await api.upsertCheckin({
       task_id: t.id,
       checkin_date: todayStr(),
-      completed: !doneSet.has(t.id),
+      completed,
+    })
+    signals.track('task.checkin.toggle', {
+      related_table: 'tasks',
+      related_id: t.id,
+      payload: { completed, hour_of_day: new Date().getHours() },
     })
     const cks = await api.listCheckins(todayStr())
     setCheckins(cks)
@@ -77,6 +84,11 @@ export default function Plan() {
   async function skipTask(t: Task) {
     try {
       await api.overrideTask(t.id, { week_start: weekStart, action: 'skip' })
+      signals.track('task.override.skip', {
+        related_table: 'tasks',
+        related_id: t.id,
+        payload: { week },
+      })
       toast.success('本周跳过')
       reload()
     } catch (e: any) {
@@ -102,6 +114,10 @@ export default function Plan() {
         action: 'replace',
         custom_title: title,
         custom_description: editDesc.trim() || undefined,
+      })
+      signals.track('task.override.replace', {
+        related_table: 'tasks',
+        related_id: t.id,
       })
       toast.success('换成了你自己的版本')
       setEditingId(null)

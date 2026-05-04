@@ -3,11 +3,12 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, Mistake, PracticeSet } from '../api'
 import { useToast } from '../components/Toast'
 import EmptyState from '../components/EmptyState'
-import ReflectionField from '../components/ReflectionField'
+import ReflectionPrompt from '../components/ReflectionPrompt'
 import MathText from '../components/MathText'
 import SolutionSteps from '../components/SolutionSteps'
 import PrintPanel, { type PrintPanelOptions } from '../components/PrintPanel'
 import { buildPrintablePayload, openPrintWindow } from '../print/printable'
+import signals from '../lib/signals'
 
 const SUBJECTS = ['数学', '科学', '英语', '语文', '社会']
 const REASONS = ['计算错', '审题漏', '不会做', '步骤乱', '知识遗忘', '其他']
@@ -106,14 +107,31 @@ export default function ErrorBook() {
       alert('题目或知识点至少填一个')
       return
     }
-    await api.createMistake(form)
+    const created = await api.createMistake(form)
+    signals.track('mistake.create', {
+      related_table: 'mistakes',
+      related_id: created?.id,
+      payload: { subject: form.subject, reason: form.reason, source: 'manual' },
+    })
     setForm({ ...empty })
     setShowAdd(false)
     reload()
   }
 
   async function toggleMastered(m: Mistake) {
-    await api.updateMistake(m.id, { mastered: m.mastered ? 0 : 1 })
+    const next = m.mastered ? 0 : 1
+    await api.updateMistake(m.id, { mastered: next })
+    if (next === 1) {
+      const days = Math.max(
+        0,
+        Math.floor((Date.now() - new Date(m.created_at).getTime()) / 86_400_000),
+      )
+      signals.track('mistake.mark_mastered', {
+        related_table: 'mistakes',
+        related_id: m.id,
+        payload: { days_since_create: days },
+      })
+    }
     reload()
   }
 
@@ -436,7 +454,18 @@ export default function ErrorBook() {
                   )}
                   {/* 解题过程 (可折叠) */}
                   {m.solution_steps && (
-                    <details className="mt-2 text-sm">
+                    <details
+                      className="mt-2 text-sm"
+                      onToggle={(e) => {
+                        if ((e.target as HTMLDetailsElement).open) {
+                          signals.track('mistake.view_detail', {
+                            related_table: 'mistakes',
+                            related_id: m.id,
+                            payload: { subject: m.subject },
+                          })
+                        }
+                      }}
+                    >
                       <summary className="cursor-pointer text-purple-600 hover:text-purple-800 text-xs font-medium">
                         ▶ 参考思路 (点击展开完整解题过程)
                       </summary>
@@ -445,12 +474,11 @@ export default function ErrorBook() {
                       </div>
                     </details>
                   )}
-                  {/* 她说 — 永远不喂给 AI */}
-                  <ReflectionField
-                    kind="mistake_note"
-                    relatedId={m.id}
-                    label="我的想法"
-                    placeholder="你当时为什么会错? 以后怎么避免? 写给自己看."
+                  {/* 她说 — 永远不喂给 AI. P4: Reflector 抛一个反思问题 */}
+                  <ReflectionPrompt
+                    sourceTable="mistakes"
+                    sourceId={m.id}
+                    storeKind="mistake_note"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
@@ -467,6 +495,12 @@ export default function ErrorBook() {
                   >
                     {m.mastered ? '标记未掌握' : '标记掌握'}
                   </button>
+                  <Link
+                    to={`/feynman?source_table=mistakes&source_id=${m.id}`}
+                    className="text-xs px-2 py-1 border border-purple-200 bg-purple-50 text-purple-700 rounded hover:bg-purple-100 whitespace-nowrap text-center"
+                  >
+                    🎓 教教我?
+                  </Link>
                   <button
                     onClick={() => remove(m.id)}
                     className="text-xs text-red-500 hover:text-red-700"

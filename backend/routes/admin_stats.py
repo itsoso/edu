@@ -83,3 +83,72 @@ def llm_usage():
             "total_response_chars": totals["total_response_chars"] or 0,
         },
     })
+
+
+@bp.get("/api/stats/upload/compression")
+@login_required
+def upload_compression_stats():
+    """试卷上传压缩效果统计 (当前用户).
+
+    响应:
+    {
+      "total_uploads": 42,
+      "with_thumb": 40,
+      "orig_total_bytes": 186000000,
+      "thumb_total_bytes": 34000000,
+      "saved_ratio": 0.82,
+      "avg_orig_kb": 4428,
+      "avg_thumb_kb": 850,
+      "failed_7d": 1,
+      "recent_24h": { "uploads": 5, "failed": 0 }
+    }
+    """
+    with db() as conn:
+        agg = conn.execute(
+            """SELECT COUNT(*) AS total,
+                      SUM(CASE WHEN thumb_path IS NOT NULL THEN 1 ELSE 0 END) AS with_thumb,
+                      COALESCE(SUM(orig_size), 0) AS orig_total,
+                      COALESCE(SUM(thumb_size), 0) AS thumb_total,
+                      COALESCE(AVG(orig_size), 0) AS avg_orig,
+                      COALESCE(AVG(thumb_size), 0) AS avg_thumb
+               FROM exam_uploads
+               WHERE owner_user_id = ?""",
+            (g.owner_id,),
+        ).fetchone()
+
+        failed_7d = conn.execute(
+            """SELECT COUNT(*) FROM exam_uploads
+               WHERE owner_user_id = ? AND status = 'failed'
+                 AND date(created_at) >= date('now', '-6 day')""",
+            (g.owner_id,),
+        ).fetchone()[0]
+
+        r24 = conn.execute(
+            """SELECT COUNT(*) AS uploads,
+                      SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed
+               FROM exam_uploads
+               WHERE owner_user_id = ?
+                 AND created_at >= datetime('now', '-24 hour')""",
+            (g.owner_id,),
+        ).fetchone()
+
+    orig_total = agg["orig_total"] or 0
+    thumb_total = agg["thumb_total"] or 0
+    saved_ratio = 0.0
+    if orig_total > 0 and thumb_total > 0:
+        saved_ratio = round(1 - thumb_total / orig_total, 3)
+
+    return jsonify({
+        "total_uploads": agg["total"] or 0,
+        "with_thumb": agg["with_thumb"] or 0,
+        "orig_total_bytes": orig_total,
+        "thumb_total_bytes": thumb_total,
+        "saved_ratio": saved_ratio,
+        "avg_orig_kb": round((agg["avg_orig"] or 0) / 1024),
+        "avg_thumb_kb": round((agg["avg_thumb"] or 0) / 1024),
+        "failed_7d": failed_7d or 0,
+        "recent_24h": {
+            "uploads": r24["uploads"] or 0,
+            "failed": r24["failed"] or 0,
+        },
+    })

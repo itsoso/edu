@@ -55,3 +55,4 @@ mobile/android/.gradle/
 mobile/android/local.properties
 mobile/*.log
 mobile/.metro-cache/
+mobile/ios/build-archive/

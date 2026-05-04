@@ -82,7 +82,12 @@ class LLMClient:
 
     # -------- 辅助: 图片转 data URL --------
     @staticmethod
-    def image_to_data_url(image_path: str | Path) -> str:
+    def image_to_data_url(
+        image_path: str | Path,
+        max_edge: int = 1600,
+        quality: int = 80,
+        force_compress: bool = False,
+    ) -> str:
         p = Path(image_path)
         ext = p.suffix.lower().lstrip(".")
         mime = {
@@ -90,18 +95,67 @@ class LLMClient:
             "png": "image/png",  "webp": "image/webp",
             "gif": "image/gif",
         }.get(ext, "image/jpeg")
-        b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+
+        raw = p.read_bytes()
+        # 部分 LLM 网关对 image_url data URL 体积有上限 (~4MB base64).
+        # 大图或 PNG/WEBP 或 force_compress=True 时降采样到 JPEG.
+        if force_compress or len(raw) > 1_500_000 or ext in ("png", "webp"):
+            try:
+                from io import BytesIO
+                from PIL import Image, ImageOps
+
+                img = Image.open(BytesIO(raw))
+                img = ImageOps.exif_transpose(img)
+                if img.mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
+                w, h = img.size
+                long_edge = max(w, h)
+                if long_edge > max_edge:
+                    scale = max_edge / long_edge
+                    img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+                buf = BytesIO()
+                img.save(buf, format="JPEG", quality=quality, optimize=True)
+                raw = buf.getvalue()
+                mime = "image/jpeg"
+            except Exception:
+                pass  # 压缩失败 fallback 原图
+
+        b64 = base64.b64encode(raw).decode("ascii")
         return f"data:{mime};base64,{b64}"
 
     # -------- 高层封装 --------
     def vision_chat(self, text: str, image_paths: list[str | Path], **kw) -> str:
-        content: list[dict] = [{"type": "text", "text": text}]
-        for p in image_paths:
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": self.image_to_data_url(p)},
-            })
-        return self.chat([{"role": "user", "content": content}], **kw)
+        """Vision 调用. 首次按默认档位, 若 LLM 网关返回 4xx 且报 image 相关错误,
+        自动用更狠压缩 (1024px q60) 重试一次."""
+        def _call(max_edge: int, quality: int, force: bool) -> str:
+            content: list[dict] = [{"type": "text", "text": text}]
+            for p in image_paths:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": self.image_to_data_url(
+                            p, max_edge=max_edge, quality=quality, force_compress=force
+                        )
+                    },
+                })
+            return self.chat([{"role": "user", "content": content}], **kw)
+
+        try:
+            return _call(1600, 80, False)
+        except LLMError as e:
+            msg = str(e).lower()
+            is_image_err = (
+                ("gateway 400" in msg and ("image" in msg or "url" in msg or "payload" in msg))
+                or "gateway 413" in msg
+            )
+            if not is_image_err:
+                raise
+            # 更狠压缩后重试一次: 1024px q60, 强制压缩
+            import logging
+            logging.getLogger(__name__).warning(
+                "vision_chat first attempt failed, retry with 1024px q60: %s", e
+            )
+            return _call(1024, 60, True)
 
     def json_chat(self, prompt: str, image_paths: list | None = None, **kw) -> Any:
         """请 LLM 返回 JSON. 容错解析 (去 markdown 代码块)."""

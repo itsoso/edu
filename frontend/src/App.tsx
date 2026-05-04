@@ -1,9 +1,10 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { NavLink, Route, Routes, Navigate, useLocation } from 'react-router-dom'
 import clsx from 'clsx'
 import { useAuth } from './auth'
 import { useIsDesktop } from './hooks/useMediaQuery'
 import { useInstallPrompt } from './hooks/useInstallPrompt'
+import signals from './lib/signals'
 
 // Dashboard 作为首页保持同步加载, 保证首屏最快
 import Dashboard from './pages/Dashboard'
@@ -18,10 +19,16 @@ const Methods = lazy(() => import('./pages/Methods'))
 const Analysis = lazy(() => import('./pages/Analysis'))
 const Scan = lazy(() => import('./pages/Scan'))
 const Practice = lazy(() => import('./pages/Practice'))
+const Insights = lazy(() => import('./pages/Insights'))
 const Reports = lazy(() => import('./pages/Reports'))
+const Coach = lazy(() => import('./pages/Coach'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Journal = lazy(() => import('./pages/Journal'))
 const Essays = lazy(() => import('./pages/Essays'))
+const Feynman = lazy(() => import('./pages/Feynman'))
+const FeynmanHistory = lazy(() => import('./pages/FeynmanHistory'))
+const FeynmanNew = lazy(() => import('./pages/FeynmanNew'))
+const Schedule = lazy(() => import('./pages/Schedule'))
 
 const navItems = [
   { to: '/', label: '今日', icon: '🏠', end: true },
@@ -32,6 +39,10 @@ const navItems = [
   { to: '/practice', label: '训练', icon: '🏋️' },
   { to: '/trends', label: '趋势', icon: '📈' },
   { to: '/plan', label: '计划', icon: '📅' },
+  { to: '/schedule', label: '课程表', icon: '🗓️' },
+  { to: '/insights', label: '看见自己', icon: '🪞' },
+  { to: '/feynman-history', label: '你讲过的', icon: '🎓' },
+  { to: '/coach', label: '周日复盘', icon: '📅' },
   { to: '/reports', label: '月度复盘', icon: '🧠' },
   { to: '/methods', label: '方法卡', icon: '🎯' },
   { to: '/analysis', label: '分析', icon: '📄' },
@@ -41,7 +52,35 @@ const navItems = [
 const primaryNavItems = ['/', '/scan', '/mistakes', '/practice', '/trends']
 
 export default function App() {
-  const { loading } = useAuth()
+  const { user, loading } = useAuth()
+
+  // 用户登录后启动 signals 会话; 接入 visibility / unload 钩子.
+  useEffect(() => {
+    if (!user) return
+    let active = true
+    void (async () => {
+      await signals.refreshSettings()
+      if (!active) return
+      signals.startSession({ platform: 'web' })
+    })()
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        signals.flushNow()
+      }
+    }
+    const onBeforeUnload = () => {
+      signals.endSession(true)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      active = false
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+    }
+  }, [user?.id])
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-slate-500">
@@ -205,11 +244,18 @@ function Shell() {
             <Route path="/scan" element={<Scan />} />
             <Route path="/mistakes" element={<ErrorBook />} />
             <Route path="/practice" element={<Practice />} />
+            <Route path="/insights" element={<Insights />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/coach" element={<Coach />} />
             <Route path="/methods" element={<Methods />} />
             <Route path="/analysis" element={<Analysis />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/journal" element={<Journal />} />
+            <Route path="/feynman" element={<Feynman />} />
+            <Route path="/feynman/new" element={<FeynmanNew />} />
+            <Route path="/feynman/:id" element={<Feynman />} />
+            <Route path="/feynman-history" element={<FeynmanHistory />} />
+            <Route path="/schedule" element={<Schedule />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </Suspense>

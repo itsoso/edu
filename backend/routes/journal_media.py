@@ -96,7 +96,7 @@ def upload_journal_media():
     media_type = request.form.get("media_type")
     if media_type not in ("audio", "video"):
         # 根据 extension 推断
-        media_type = "video" if ext in ("mp4", "webm") else "audio"
+        media_type = "video" if ext in ("mp4", "mov", "m4v", "webm") else "audio"
 
     user_dir = JOURNAL_UPLOAD_DIR / str(g.owner_id)
     user_dir.mkdir(parents=True, exist_ok=True)

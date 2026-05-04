@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api, PracticeSet, PracticeItem } from '../api'
+import signals from '../lib/signals'
 import { usePolling } from '../hooks/usePolling'
 import EmptyState from '../components/EmptyState'
 import MathText from '../components/MathText'
 import SolutionSteps from '../components/SolutionSteps'
 import PrintPanel, { type PrintPanelOptions } from '../components/PrintPanel'
+import ReflectionPrompt from '../components/ReflectionPrompt'
 import { buildPrintablePayload, openPrintWindow } from '../print/printable'
 
 export default function Practice() {
@@ -249,6 +252,7 @@ export default function Practice() {
                     key={it.id}
                     index={idx}
                     item={it}
+                    subject={active.subject}
                     selected={selectedItemIds.has(it.id)}
                     onToggleSelected={() => toggleSelected(it.id)}
                     onGraded={(updated) => {
@@ -287,19 +291,91 @@ export default function Practice() {
 }
 
 function ItemCard({
-  index, item, selected, onToggleSelected, onGraded,
+  index, item, selected, onToggleSelected, onGraded, subject,
 }: {
   index: number
   item: PracticeItem
   selected: boolean
   onToggleSelected: () => void
   onGraded: (updated: PracticeItem) => void
+  subject?: string | null
 }) {
   const [answer, setAnswer] = useState(item.student_answer || '')
   const [showSolution, setShowSolution] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const done = item.is_correct !== null
+
+  const startedAtRef = useRef<number>(Date.now())
+  const lastInputAtRef = useRef<number>(Date.now())
+  const pauseCountRef = useRef<number>(0)
+  const pauseTimerRef = useRef<number | null>(null)
+  const hintUsedRef = useRef<boolean>(false)
+  const startedRef = useRef<boolean>(false)
+  const submittedRef = useRef<boolean>(done)
+
+  // 进入卡片 → start (只触发一次)
+  useEffect(() => {
+    if (startedRef.current || done) return
+    startedRef.current = true
+    startedAtRef.current = Date.now()
+    signals.track('practice.item.start', {
+      related_table: 'practice_items',
+      related_id: item.id,
+      payload: {
+        subject: subject || undefined,
+        difficulty: item.difficulty || undefined,
+      },
+    })
+    // 卡片卸载时若未提交 → skip 事件
+    return () => {
+      if (pauseTimerRef.current != null) {
+        window.clearTimeout(pauseTimerRef.current)
+      }
+      if (!submittedRef.current && !done) {
+        const elapsed = Math.round((Date.now() - startedAtRef.current) / 1000)
+        signals.track('practice.item.skip', {
+          related_table: 'practice_items',
+          related_id: item.id,
+          payload: { elapsed_secs: elapsed },
+        })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id])
+
+  function onAnswerChange(v: string) {
+    setAnswer(v)
+    lastInputAtRef.current = Date.now()
+    if (pauseTimerRef.current != null) window.clearTimeout(pauseTimerRef.current)
+    pauseTimerRef.current = window.setTimeout(() => {
+      // 5 秒无输入 = 一次 pause
+      const pauseSecs = Math.round((Date.now() - lastInputAtRef.current) / 1000)
+      pauseCountRef.current += 1
+      signals.track('practice.item.input_pause', {
+        related_table: 'practice_items',
+        related_id: item.id,
+        payload: {
+          pause_count_so_far: pauseCountRef.current,
+          pause_secs: pauseSecs,
+        },
+      })
+    }, 5000)
+  }
+
+  function toggleSolution() {
+    const next = !showSolution
+    setShowSolution(next)
+    if (next && !hintUsedRef.current) {
+      hintUsedRef.current = true
+      const t = Math.round((Date.now() - startedAtRef.current) / 1000)
+      signals.track('practice.item.hint_used', {
+        related_table: 'practice_items',
+        related_id: item.id,
+        payload: { time_before_hint_secs: t },
+      })
+    }
+  }
 
   async function submit() {
     if (!answer.trim()) {
@@ -310,6 +386,17 @@ function ItemCard({
     setErr('')
     try {
       const updated = await api.gradePracticeItem(item.id, answer.trim())
+      submittedRef.current = true
+      const elapsed = Math.round((Date.now() - startedAtRef.current) / 1000)
+      signals.track('practice.item.submit', {
+        related_table: 'practice_items',
+        related_id: item.id,
+        payload: {
+          elapsed_secs: elapsed,
+          answer_length: answer.trim().length,
+          hint_used: hintUsedRef.current,
+        },
+      })
       onGraded(updated)
     } catch (e: any) {
       setErr(e.message || String(e))
@@ -345,7 +432,7 @@ function ItemCard({
 
       <textarea
         value={answer}
-        onChange={(e) => setAnswer(e.target.value)}
+        onChange={(e) => onAnswerChange(e.target.value)}
         placeholder="在这里写你的作答（可多行）"
         rows={3}
         className="w-full border border-slate-300 rounded px-3 py-2 text-sm"
@@ -363,7 +450,7 @@ function ItemCard({
             {busy ? 'AI 批改中...' : '提交作答'}
           </button>
           <button
-            onClick={() => setShowSolution((v) => !v)}
+            onClick={toggleSolution}
             className="px-3 py-1.5 text-sm border border-slate-300 text-slate-600 rounded"
           >
             {showSolution ? '隐藏思路' : '卡住了? 看思路'}
@@ -395,6 +482,26 @@ function ItemCard({
           )}
         </details>
       )}
+
+      {done && item.is_correct ? (
+        <div className="pt-1">
+          <Link
+            to={`/feynman?source_table=practice_items&source_id=${item.id}`}
+            className="inline-flex items-center gap-1 rounded-full border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 hover:bg-purple-100"
+          >
+            🎓 教教我?
+          </Link>
+        </div>
+      ) : null}
+
+      {done && !item.is_correct ? (
+        <ReflectionPrompt
+          sourceTable="practice_items"
+          sourceId={item.id}
+          storeKind="free_write"
+          storeRelatedKey={`pi_${item.id}`}
+        />
+      ) : null}
     </div>
   )
 }

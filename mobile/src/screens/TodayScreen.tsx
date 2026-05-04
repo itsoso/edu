@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { api, Task, Checkin } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { colors } from '../lib/theme'
+import { useResponsive } from '../lib/responsive'
 
 function todayStr(): string {
   const d = new Date()
@@ -26,6 +27,7 @@ function dowFromDate(d: Date): number {
 
 export default function TodayScreen() {
   const { user, logout } = useAuth()
+  const { hPadding } = useResponsive()
   const [week, setWeek] = useState(1)
   const [tasks, setTasks] = useState<Task[]>([])
   const [checkins, setCheckins] = useState<Checkin[]>([])
@@ -91,7 +93,7 @@ export default function TodayScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingHorizontal: hPadding }]}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
       >
         <View style={styles.header}>

@@ -3,6 +3,7 @@
 LLM 抽取/分析是异步的: 接口立即返回 202, 后台线程调 LLM 并更新 DB.
 前端通过轮询 GET /api/uploads/:id 等待 status 变化 (extracting → extracted/failed).
 """
+import hashlib
 import json
 import logging
 import uuid
@@ -20,6 +21,7 @@ from llm import (
 from llm_audit import llm_audit
 from constants import UPLOAD_DIR, ALLOWED_IMAGE_EXT
 from background import submit as bg_submit
+from image_utils import make_thumb
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("uploads", __name__)
@@ -43,6 +45,7 @@ def _upload_to_dict(row):
             d["analysis"] = None
     d.pop("analysis_json", None)
     d["image_url"] = f"/api/uploads/{d['id']}/file"
+    d["preview_url"] = f"/api/uploads/{d['id']}/preview"
     return d
 
 
@@ -84,12 +87,67 @@ def upload_exam_image():
     disk_path = user_dir / disk_name
     f.save(disk_path)
 
+    orig_bytes = disk_path.read_bytes()
+    orig_size = len(orig_bytes)
+    image_hash = hashlib.sha256(orig_bytes).hexdigest()
+    del orig_bytes
+
+    # 同步生成压缩 thumb (1600px q80) + preview (400px q75). 失败不阻塞上传.
+    thumb_name = f"{uid}_thumb.jpg"
+    thumb_path = user_dir / thumb_name
+    thumb_size = make_thumb(disk_path, thumb_path, max_edge=1600, quality=80)
+    thumb_rel = f"{g.owner_id}/{thumb_name}" if thumb_size else None
+
+    preview_name = f"{uid}_preview.jpg"
+    preview_path_fs = user_dir / preview_name
+    preview_size = make_thumb(disk_path, preview_path_fs, max_edge=400, quality=75)
+    preview_rel = f"{g.owner_id}/{preview_name}" if preview_size else None
+
     rel = f"{g.owner_id}/{disk_name}"
+
+    # 去重复用: 同 owner 之前上传过同 hash 且已 extracted, 直接复用旧 extracted_json
     with db() as conn:
+        prior = conn.execute(
+            """SELECT extracted_json, analysis_json, subject
+               FROM exam_uploads
+               WHERE owner_user_id = ? AND image_hash = ?
+                 AND status IN ('extracted', 'analyzed')
+                 AND extracted_json IS NOT NULL
+               ORDER BY id DESC LIMIT 1""",
+            (g.owner_id, image_hash),
+        ).fetchone()
+
+        if prior:
+            # 秒出: 新行状态直接标成 extracted, 携带旧 JSON
+            cur = conn.execute(
+                """INSERT INTO exam_uploads (
+                     owner_user_id, file_path, file_name, exam_name, status,
+                     thumb_path, preview_path, orig_size, thumb_size, image_hash,
+                     extracted_json, analysis_json, subject
+                   )
+                   VALUES (?, ?, ?, ?, 'extracted', ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    g.owner_id, rel, orig, request.form.get("exam_name"),
+                    thumb_rel, preview_rel, orig_size, thumb_size, image_hash,
+                    prior["extracted_json"], prior["analysis_json"], prior["subject"],
+                ),
+            )
+            upload_id = cur.lastrowid
+            row = conn.execute(
+                "SELECT * FROM exam_uploads WHERE id = ?", (upload_id,)
+            ).fetchone()
+            logger.info("upload %s hash-hit, reusing extracted from prior", upload_id)
+            return jsonify(_upload_to_dict(row)), 201
+
         cur = conn.execute(
-            """INSERT INTO exam_uploads (owner_user_id, file_path, file_name, exam_name, status)
-               VALUES (?, ?, ?, ?, 'uploaded')""",
-            (g.owner_id, rel, orig, request.form.get("exam_name")),
+            """INSERT INTO exam_uploads (owner_user_id, file_path, file_name, exam_name,
+                                         status, thumb_path, preview_path,
+                                         orig_size, thumb_size, image_hash)
+               VALUES (?, ?, ?, ?, 'uploaded', ?, ?, ?, ?, ?)""",
+            (
+                g.owner_id, rel, orig, request.form.get("exam_name"),
+                thumb_rel, preview_rel, orig_size, thumb_size, image_hash,
+            ),
         )
         upload_id = cur.lastrowid
         row = conn.execute("SELECT * FROM exam_uploads WHERE id = ?", (upload_id,)).fetchone()
@@ -150,12 +208,30 @@ def get_upload_file(upload_id):
     return send_from_directory(UPLOAD_DIR, row["file_path"])
 
 
+@bp.get("/api/uploads/<int:upload_id>/preview")
+@login_required
+def get_upload_preview(upload_id):
+    """400px 列表预览. preview 不存在则回退原图."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT file_path, preview_path FROM exam_uploads WHERE id = ? AND owner_user_id = ?",
+            (upload_id, g.owner_id),
+        ).fetchone()
+    if not row:
+        abort(404)
+    rel = row["preview_path"] or row["file_path"]
+    p = UPLOAD_DIR / rel
+    if not p.exists():
+        abort(404)
+    return send_from_directory(UPLOAD_DIR, rel)
+
+
 @bp.delete("/api/uploads/<int:upload_id>")
 @login_required
 def delete_upload(upload_id):
     with db() as conn:
         row = conn.execute(
-            "SELECT file_path FROM exam_uploads WHERE id = ? AND owner_user_id = ?",
+            "SELECT file_path, thumb_path, preview_path FROM exam_uploads WHERE id = ? AND owner_user_id = ?",
             (upload_id, g.owner_id),
         ).fetchone()
         if not row:
@@ -164,17 +240,36 @@ def delete_upload(upload_id):
             (UPLOAD_DIR / row["file_path"]).unlink(missing_ok=True)
         except Exception:
             pass
+        if row["thumb_path"]:
+            try:
+                (UPLOAD_DIR / row["thumb_path"]).unlink(missing_ok=True)
+            except Exception:
+                pass
+        if row["preview_path"]:
+            try:
+                (UPLOAD_DIR / row["preview_path"]).unlink(missing_ok=True)
+            except Exception:
+                pass
         conn.execute("DELETE FROM exam_uploads WHERE id = ?", (upload_id,))
     return {"ok": True}
 
 
 # ---------- LLM 抽取 / 分析 (异步) ----------
-def _run_extract_bg(upload_id: int, file_path_str: str, owner_id: int):
+def _resolve_llm_path(file_path_str: str, thumb_path_str: str | None):
+    """优先用持久化 thumb (上传时生成的压缩版), 不存在再回退原图."""
+    if thumb_path_str:
+        tp = UPLOAD_DIR / thumb_path_str
+        if tp.exists():
+            return tp
+    return UPLOAD_DIR / file_path_str
+
+
+def _run_extract_bg(upload_id: int, file_path_str: str, thumb_path_str: str | None, owner_id: int):
     """后台线程: 调 vision LLM 抽错题, 写回 DB.
 
     不能碰 Flask g/session/request. 所有参数必须从请求线程拷贝.
     """
-    path = UPLOAD_DIR / file_path_str
+    path = _resolve_llm_path(file_path_str, thumb_path_str)
     try:
         llm = get_llm()
         with llm_audit("extract_mistakes", owner_id=owner_id, model=llm.model) as audit:
@@ -187,7 +282,8 @@ def _run_extract_bg(upload_id: int, file_path_str: str, owner_id: int):
             conn.execute(
                 """UPDATE exam_uploads
                    SET status='extracted', extracted_json=?,
-                       subject=COALESCE(subject, ?), error_message=NULL
+                       subject=COALESCE(subject, ?), error_message=NULL,
+                       updated_at=CURRENT_TIMESTAMP
                    WHERE id=?""",
                 (json.dumps(data, ensure_ascii=False), subject, upload_id),
             )
@@ -196,13 +292,13 @@ def _run_extract_bg(upload_id: int, file_path_str: str, owner_id: int):
         logger.exception("extract failed for upload %s", upload_id)
         with db() as conn:
             conn.execute(
-                "UPDATE exam_uploads SET status='failed', error_message=? WHERE id=?",
+                "UPDATE exam_uploads SET status='failed', error_message=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (str(e)[:500], upload_id),
             )
 
 
-def _run_analyze_bg(upload_id: int, file_path_str: str, prev_status: str, owner_id: int):
-    path = UPLOAD_DIR / file_path_str
+def _run_analyze_bg(upload_id: int, file_path_str: str, thumb_path_str: str | None, prev_status: str, owner_id: int):
+    path = _resolve_llm_path(file_path_str, thumb_path_str)
     try:
         llm = get_llm()
         with llm_audit("analyze_upload", owner_id=owner_id, model=llm.model) as audit:
@@ -216,7 +312,8 @@ def _run_analyze_bg(upload_id: int, file_path_str: str, prev_status: str, owner_
         new_status = "analyzed"
         with db() as conn:
             conn.execute(
-                """UPDATE exam_uploads SET analysis_json=?, status=?, error_message=NULL
+                """UPDATE exam_uploads SET analysis_json=?, status=?, error_message=NULL,
+                                          updated_at=CURRENT_TIMESTAMP
                    WHERE id=?""",
                 (json.dumps(data, ensure_ascii=False), new_status, upload_id),
             )
@@ -225,9 +322,28 @@ def _run_analyze_bg(upload_id: int, file_path_str: str, prev_status: str, owner_
         logger.exception("analyze failed for upload %s", upload_id)
         with db() as conn:
             conn.execute(
-                "UPDATE exam_uploads SET status='failed', error_message=? WHERE id=?",
+                "UPDATE exam_uploads SET status='failed', error_message=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (str(e)[:500], upload_id),
             )
+
+
+def _is_stuck(row) -> bool:
+    """判断 extracting/analyzing 状态是否已超 5 分钟, 允许重新派发."""
+    import datetime
+    status = row["status"]
+    if status not in ("extracting", "analyzing"):
+        return False
+    ts = row["updated_at"] if "updated_at" in row.keys() else None
+    if not ts:
+        ts = row["created_at"]
+    if not ts:
+        return True
+    try:
+        # sqlite CURRENT_TIMESTAMP 是 'YYYY-MM-DD HH:MM:SS' (UTC)
+        dt = datetime.datetime.fromisoformat(ts.replace(" ", "T"))
+        return (datetime.datetime.utcnow() - dt).total_seconds() > 300
+    except Exception:
+        return False
 
 
 @bp.post("/api/uploads/<int:upload_id>/extract")
@@ -236,16 +352,17 @@ def extract_mistakes_from_upload(upload_id):
     """异步启动 vision LLM 抽取. 立即返回 202 + 当前 row (status=extracting)."""
     with db() as conn:
         row = _get_upload_or_403(conn, upload_id)
-        if row["status"] in ("extracting", "analyzing"):
+        if row["status"] in ("extracting", "analyzing") and not _is_stuck(row):
             return jsonify(_upload_to_dict(row)), 202
         conn.execute(
-            "UPDATE exam_uploads SET status='extracting', error_message=NULL WHERE id=?",
+            "UPDATE exam_uploads SET status='extracting', error_message=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (upload_id,),
         )
         row = conn.execute("SELECT * FROM exam_uploads WHERE id = ?", (upload_id,)).fetchone()
     file_path_str = row["file_path"]
+    thumb_path_str = row["thumb_path"] if "thumb_path" in row.keys() else None
     owner_id = g.owner_id
-    bg_submit(_run_extract_bg, upload_id, file_path_str, owner_id)
+    bg_submit(_run_extract_bg, upload_id, file_path_str, thumb_path_str, owner_id)
     return jsonify(_upload_to_dict(row)), 202
 
 
@@ -255,17 +372,18 @@ def full_analysis_of_upload(upload_id):
     """异步启动全卷分析. 立即返回 202 + 当前 row (status=analyzing)."""
     with db() as conn:
         row = _get_upload_or_403(conn, upload_id)
-        if row["status"] in ("extracting", "analyzing"):
+        if row["status"] in ("extracting", "analyzing") and not _is_stuck(row):
             return jsonify(_upload_to_dict(row)), 202
         prev_status = row["status"] or "uploaded"
         conn.execute(
-            "UPDATE exam_uploads SET status='analyzing', error_message=NULL WHERE id=?",
+            "UPDATE exam_uploads SET status='analyzing', error_message=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (upload_id,),
         )
         row = conn.execute("SELECT * FROM exam_uploads WHERE id = ?", (upload_id,)).fetchone()
     file_path_str = row["file_path"]
+    thumb_path_str = row["thumb_path"] if "thumb_path" in row.keys() else None
     owner_id = g.owner_id
-    bg_submit(_run_analyze_bg, upload_id, file_path_str, prev_status, owner_id)
+    bg_submit(_run_analyze_bg, upload_id, file_path_str, thumb_path_str, prev_status, owner_id)
     return jsonify(_upload_to_dict(row)), 202
 
 

@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react'
 import { api, WeeklyGoal } from '../api'
 import { useToast } from './Toast'
+import signals from '../lib/signals'
 
 type FocusType = 'redo_mistakes' | 'learn_new' | 'challenge' | 'custom'
 
@@ -79,6 +80,14 @@ export default function WeeklyGoalCeremony({ weekStart }: { weekStart: string })
         week_start: weekStart,
         goal_text: text,
         focus_type: selectedFocus || undefined,
+      })
+      signals.track('weekly_goal.set', {
+        related_table: 'weekly_goals',
+        related_id: saved?.id,
+        payload: {
+          focus_type: selectedFocus || undefined,
+          week_start: weekStart,
+        },
       })
       setExisting(saved)
       setExpanded(false)

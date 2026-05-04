@@ -329,6 +329,209 @@ CREATE INDEX IF NOT EXISTS idx_essays_type     ON essays(owner_user_id, essay_ty
 CREATE INDEX IF NOT EXISTS idx_essays_topic    ON essays(owner_user_id, topic);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_owner    ON llm_calls(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_date     ON llm_calls(created_at DESC);
+
+-- ====================== Agent Native: P0 信号 + P1 画像 ======================
+
+-- 用户行为信号. 仅元数据, 不含原始内容 (题目/答案/反思/日记内容).
+-- 90 天 TTL, 每天清理一次.
+CREATE TABLE IF NOT EXISTS interaction_signals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL,
+    event_type      TEXT    NOT NULL,           -- 见 routes/signals.py 的 ALLOWED_EVENT_TYPES
+    related_table   TEXT,                       -- 'mistakes' | 'practice_items' | 'essays' | 'tasks' | NULL
+    related_id      INTEGER,
+    payload_json    TEXT,                       -- 事件特定元数据 (JSON, 服务端校验)
+    session_id      TEXT,                       -- 客户端启动时分配的 UUID
+    client          TEXT NOT NULL DEFAULT 'unknown',  -- 'web' | 'mobile-ios' | 'mobile-android'
+    occurred_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_signals_owner_time ON interaction_signals(owner_user_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_signals_owner_type ON interaction_signals(owner_user_id, event_type, occurred_at DESC);
+
+-- 学生画像. 每次 build 写入新 version, 历史保留 30 天 + 月度快照.
+-- profile_json 是后续所有 agent 的输入. 用户可见、可改、可删.
+CREATE TABLE IF NOT EXISTS student_profile (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id     INTEGER NOT NULL,
+    version           INTEGER NOT NULL,        -- 单调递增, 同 user 内唯一
+    profile_json      TEXT    NOT NULL,        -- 完整画像 JSON, schema_version=1
+    source_summary    TEXT,                    -- 80 字内中文 "她最近怎么样" (LLM 写, 给学生看)
+    computed_from     TEXT,                    -- 描述本次 build 的输入窗口
+    build_method      TEXT NOT NULL,           -- 'cron_daily' | 'manual_rebuild' | 'after_correction'
+    build_cost_usd    REAL DEFAULT 0,
+    build_duration_ms INTEGER DEFAULT 0,
+    is_monthly_snapshot INTEGER DEFAULT 0,     -- 月度快照不参与 30 天 GC
+    created_at        TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE (owner_user_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_profile_owner_version ON student_profile(owner_user_id, version DESC);
+
+-- 用户对画像的反馈. build job 在生成新画像时必须遵守.
+-- 例: 用户 dismiss 一个 error_pattern → 下次 build 不再生成这条
+CREATE TABLE IF NOT EXISTS profile_corrections (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL,
+    field_path      TEXT    NOT NULL,           -- 'error_patterns.含参不分类讨论' / 'knowledge.数学.一元二次方程.mastery'
+    action          TEXT    NOT NULL,           -- 'dismiss' | 'lock_value' | 'reset'
+    value_json      TEXT,                       -- action='lock_value' 时存锁定值
+    reason          TEXT,                       -- 用户给出的原因, 不喂 LLM
+    created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_corrections_owner ON profile_corrections(owner_user_id, created_at DESC);
+
+-- 用户开关: 是否参与画像构建 / 信号收集
+-- 默认开启, 学生可以在设置里关
+-- 用 settings_json on users 也行, 但单独表更清晰
+CREATE TABLE IF NOT EXISTS profile_settings (
+    owner_user_id        INTEGER PRIMARY KEY,
+    signals_enabled      INTEGER DEFAULT 1,    -- 0=不收集任何 signal
+    profile_enabled      INTEGER DEFAULT 1,    -- 0=不构建画像
+    journal_volume_in_profile INTEGER DEFAULT 1,  -- 0=连日记字数也不进画像
+    agent_enabled        INTEGER DEFAULT 1,    -- 0=不出主动建议
+    agent_snoozed_until  TEXT,                 -- ISO 日期, NULL=不暂停
+    updated_at           TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Agent action trace. P0+P1 阶段不写入, schema 先建, P2 Tutor 上线时填.
+-- 让她可以审计 "agent 为什么这么说"
+CREATE TABLE IF NOT EXISTS agent_actions (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id     INTEGER NOT NULL,
+    agent_name        TEXT NOT NULL,            -- 'tutor' | 'reflector' | 'curator' | 'coach' | 'guardian'
+    action_type       TEXT NOT NULL,            -- 'suggest' | 'ask' | 'alert' | 'rearrange'
+    suggestion_id     TEXT NOT NULL,            -- UUID, 用于和 user_response 关联
+    payload_json      TEXT,                     -- 建议的具体内容
+    rationale         TEXT,                     -- 一句话: 为什么给这个建议
+    profile_version   INTEGER,                  -- 当时基于的画像版本
+    user_response     TEXT,                     -- 'accepted' | 'dismissed' | 'expired'
+    response_at       TEXT,
+    created_at        TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_actions_owner ON agent_actions(owner_user_id, created_at DESC);
+
+-- ====================== P3 费曼模式: 反向教学 ======================
+-- 学生"教"AI, AI 装作初中同学问 1-3 个跟进问题, 最后评估理解深度.
+-- 这是建知识模型最深的学习方式.
+CREATE TABLE IF NOT EXISTS feynman_sessions (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id       INTEGER NOT NULL,
+    source_table        TEXT,                       -- 'mistakes' | 'practice_items' | 'manual' | NULL
+    source_id           INTEGER,                    -- 对应主键
+    topic_seed          TEXT,                       -- 触发时携带的话题描述 (题面/知识点)
+    topic_inferred      TEXT,                       -- LLM 提炼的更精确话题
+    conversation_json   TEXT NOT NULL DEFAULT '[]', -- [{role, content, ts}]
+    ai_assessment_json  TEXT,                       -- 仅 finished 后写入
+    status              TEXT NOT NULL DEFAULT 'in_progress',  -- in_progress | finished | abandoned
+    turn_count          INTEGER DEFAULT 0,          -- 学生发言轮数
+    student_id_for_profile INTEGER,                 -- 缓存 user_id, profile_builder 用
+    manual_subject      TEXT,                       -- 主动发起时的 subject (source_table='manual')
+    manual_knowledge_point TEXT,                    -- 主动发起时的 kp (作为 mastery 键)
+    manual_source_note  TEXT,                       -- 主动发起时的 "我在哪学的" (会进开场白)
+    created_at          TEXT DEFAULT CURRENT_TIMESTAMP,
+    finished_at         TEXT,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_feynman_owner_time ON feynman_sessions(owner_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_feynman_owner_source ON feynman_sessions(owner_user_id, source_table, source_id);
+
+-- ====================== P5 Curator: 智能今日推荐项 ======================
+-- 不替代固定 plan, 是补充. 每天 cron 生成 0-5 项, 用户可完成/跳过.
+CREATE TABLE IF NOT EXISTS curated_items (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id     INTEGER NOT NULL,
+    date              TEXT    NOT NULL,             -- YYYY-MM-DD
+    kind              TEXT    NOT NULL,             -- review_mistake|pattern_drill|goal_aligned|challenge|rest_recommended
+    source_table      TEXT,                          -- mistakes|practice_sets|weekly_goals|NULL
+    source_id         INTEGER,
+    title             TEXT    NOT NULL,
+    description       TEXT,
+    rationale         TEXT,                          -- "为什么是这个" 一句话
+    estimated_minutes INTEGER,
+    priority          INTEGER DEFAULT 3,            -- 1=最高, 5=最低 (排序用)
+    status            TEXT    DEFAULT 'pending',     -- pending|completed|dismissed|expired
+    completed_at      TEXT,
+    profile_version   INTEGER,                       -- 当时基于的画像版本
+    created_at        TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_curator_owner_date ON curated_items(owner_user_id, date DESC, priority);
+CREATE INDEX IF NOT EXISTS idx_curator_owner_status ON curated_items(owner_user_id, status, date DESC);
+
+-- ====================== P6 Coach: 周日战略复盘 ======================
+CREATE TABLE IF NOT EXISTS coach_reviews (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL,
+    week_start      TEXT    NOT NULL,             -- YYYY-MM-DD (周一)
+    content_md      TEXT,                          -- LLM 写的 markdown 复盘
+    highlights_json TEXT,                          -- {strengths, watchouts, focus_for_next_week}
+    metrics_json    TEXT,                          -- {checkin_days, mistakes, practice, feynman, ...}
+    status          TEXT DEFAULT 'generating',    -- generating|done|failed
+    error_message   TEXT,
+    build_method    TEXT,                          -- 'cron_sunday' | 'manual'
+    build_cost_usd  REAL DEFAULT 0,
+    created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE (owner_user_id, week_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_coach_owner_week ON coach_reviews(owner_user_id, week_start DESC);
+
+-- ====================== P7 Guardian: \u5f02\u5e38\u76d1\u63a7 ======================
+-- 检测全用规则, LLM 只措辞. 学生看自己, 家长看孩子.
+CREATE TABLE IF NOT EXISTS guardian_alerts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL,             -- 关于谁的状态
+    target_user_id  INTEGER NOT NULL,             -- 谁会看到这条 alert (学生本人 or 绑定家长)
+    severity        TEXT NOT NULL DEFAULT 'low',   -- low|medium|high
+    category        TEXT NOT NULL,                  -- engagement_drop|give_up_pattern|pace_too_high|reflection_drop|goal_drift
+    title           TEXT NOT NULL,
+    message         TEXT,                            -- LLM 措辞 (温和)
+    evidence_json   TEXT,                            -- 触发的具体数据
+    audience        TEXT NOT NULL,                  -- 'student' | 'parent'
+    acknowledged_at TEXT,
+    expires_at      TEXT,                            -- 过期自动隐藏
+    created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_guardian_target_active
+    ON guardian_alerts(target_user_id, acknowledged_at, expires_at, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_guardian_owner_cat
+    ON guardian_alerts(owner_user_id, category, created_at DESC);
+
+-- ====================== 课程日历: 家长接送用 ======================
+-- 每条 = 一个固定时段的课 (如"周六 13:00-15:00 黄语文 213 教室").
+-- 家庭内可能多个孩子 (child_name 文本区分, 不引 users 表, 因为孩子不一定有账号).
+CREATE TABLE IF NOT EXISTS courses (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id  INTEGER NOT NULL,
+    child_name     TEXT    NOT NULL,
+    course_name    TEXT    NOT NULL,
+    weekday        INTEGER NOT NULL,             -- 1=周一 ... 7=周日
+    start_time     TEXT    NOT NULL,             -- 'HH:MM' 24h
+    end_time       TEXT    NOT NULL,             -- 'HH:MM'
+    location       TEXT,                          -- 教室/地址
+    pickup_note    TEXT,                          -- 接送备注 (谁送谁接, 几点出发)
+    notes          TEXT,
+    sort_order     INTEGER DEFAULT 0,
+    created_at     TEXT    DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TEXT    DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_courses_owner_day
+    ON courses(owner_user_id, weekday, start_time);
 """
 
 
@@ -356,6 +559,17 @@ def _column_exists(conn, table: str, col: str) -> bool:
 
 def _run_migrations(conn):
     """轻量 migration: 给已有表加新列. PRAGMA table_info 检查过后再 ALTER, 幂等."""
+    # P2 agent fields
+    if not _column_exists(conn, "profile_settings", "agent_enabled"):
+        try:
+            conn.execute("ALTER TABLE profile_settings ADD COLUMN agent_enabled INTEGER DEFAULT 1")
+        except sqlite3.OperationalError:
+            pass
+    if not _column_exists(conn, "profile_settings", "agent_snoozed_until"):
+        try:
+            conn.execute("ALTER TABLE profile_settings ADD COLUMN agent_snoozed_until TEXT")
+        except sqlite3.OperationalError:
+            pass
     # practice_sets.status / error_message
     if not _column_exists(conn, "practice_sets", "status"):
         conn.execute("ALTER TABLE practice_sets ADD COLUMN status TEXT DEFAULT 'done'")
@@ -369,6 +583,39 @@ def _run_migrations(conn):
     # mistakes.solution_steps (完整解题过程, Markdown + LaTeX)
     if not _column_exists(conn, "mistakes", "solution_steps"):
         conn.execute("ALTER TABLE mistakes ADD COLUMN solution_steps TEXT")
+    # exam_uploads: 持久化压缩版本 (thumb) + 体积统计
+    if not _column_exists(conn, "exam_uploads", "thumb_path"):
+        conn.execute("ALTER TABLE exam_uploads ADD COLUMN thumb_path TEXT")
+    if not _column_exists(conn, "exam_uploads", "orig_size"):
+        conn.execute("ALTER TABLE exam_uploads ADD COLUMN orig_size INTEGER")
+    if not _column_exists(conn, "exam_uploads", "thumb_size"):
+        conn.execute("ALTER TABLE exam_uploads ADD COLUMN thumb_size INTEGER")
+    # exam_uploads: 内容哈希 (hex sha256) 用于去重 + LLM 结果复用
+    if not _column_exists(conn, "exam_uploads", "image_hash"):
+        conn.execute("ALTER TABLE exam_uploads ADD COLUMN image_hash TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_uploads_owner_hash "
+            "ON exam_uploads(owner_user_id, image_hash)"
+        )
+    # exam_uploads: 400px preview (列表/卡片展示用)
+    if not _column_exists(conn, "exam_uploads", "preview_path"):
+        conn.execute("ALTER TABLE exam_uploads ADD COLUMN preview_path TEXT")
+    # exam_uploads: updated_at (僵尸任务恢复需要)
+    # 注意: SQLite 的 ALTER TABLE ADD COLUMN 不支持 non-constant default,
+    # 所以先加 NULL 列, 再回填 created_at 作为初值, 后续写入由应用层填.
+    if not _column_exists(conn, "exam_uploads", "updated_at"):
+        conn.execute("ALTER TABLE exam_uploads ADD COLUMN updated_at TEXT")
+        conn.execute(
+            "UPDATE exam_uploads SET updated_at = created_at WHERE updated_at IS NULL"
+        )
+    # feynman_sessions: 主动发起的 manual session 携带的 subject/kp/note
+    # 让"学生主动讲一个新学到的知识点"也能成为画像 mastery 信号
+    if not _column_exists(conn, "feynman_sessions", "manual_subject"):
+        conn.execute("ALTER TABLE feynman_sessions ADD COLUMN manual_subject TEXT")
+    if not _column_exists(conn, "feynman_sessions", "manual_knowledge_point"):
+        conn.execute("ALTER TABLE feynman_sessions ADD COLUMN manual_knowledge_point TEXT")
+    if not _column_exists(conn, "feynman_sessions", "manual_source_note"):
+        conn.execute("ALTER TABLE feynman_sessions ADD COLUMN manual_source_note TEXT")
 
 
 def init_db():

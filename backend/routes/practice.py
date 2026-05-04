@@ -144,25 +144,24 @@ def _run_generate_practice_bg(
 
 @bp.post("/api/mistakes/<int:mid>/generate-practice")
 @login_required
-def generate_practice_from_mistake(mid):
-    """异步创建训练题集. 立即返回占位 set (status=generating) + 空 items."""
-    payload = request.get_json(force=True) or {}
-    count = max(1, min(int(payload.get("count", 3)), 6))
-
+def _create_practice_set_for_mistake(owner_id: int, mid: int, count: int) -> int | None:
+    """共享 helper: 给一道错题创建一个 practice_set (status=generating) + 提交后台 LLM 任务.
+    返回 set_id 或 None (mistake 不存在/不属本人).
+    """
+    count = max(1, min(int(count), 6))
     with db() as conn:
         mrow = conn.execute(
             "SELECT * FROM mistakes WHERE id = ? AND owner_user_id = ?",
-            (mid, g.owner_id),
+            (mid, owner_id),
         ).fetchone()
         if not mrow:
-            abort(404)
-
+            return None
         cur = conn.execute(
             """INSERT INTO practice_sets
                (owner_user_id, source_mistake_id, title, subject, knowledge_point, status)
                VALUES (?, ?, ?, ?, ?, 'generating')""",
             (
-                g.owner_id,
+                owner_id,
                 mid,
                 f"{mrow['subject'] or '训练'} · {mrow['knowledge_point'] or '类题'}",
                 mrow["subject"],
@@ -170,17 +169,27 @@ def generate_practice_from_mistake(mid):
             ),
         )
         set_id = cur.lastrowid
-        # 从请求线程拷贝参数, 后台线程不能碰 g
         mistake_snapshot = {
             "subject": mrow["subject"],
             "knowledge_point": mrow["knowledge_point"],
             "question_text": mrow["question_text"],
             "reason": mrow["reason"],
         }
+    bg_submit(_run_generate_practice_bg, set_id, mistake_snapshot, count, owner_id)
+    return set_id
+
+
+def generate_practice_from_mistake(mid):
+    """异步创建训练题集. 立即返回占位 set (status=generating) + 空 items."""
+    payload = request.get_json(force=True) or {}
+    count = max(1, min(int(payload.get("count", 3)), 6))
+
+    set_id = _create_practice_set_for_mistake(g.owner_id, mid, count)
+    if set_id is None:
+        abort(404)
+    with db() as conn:
         row = conn.execute("SELECT * FROM practice_sets WHERE id = ?", (set_id,)).fetchone()
         resp = _set_to_dict(conn, row)
-
-    bg_submit(_run_generate_practice_bg, set_id, mistake_snapshot, count, g.owner_id)
     return jsonify(resp), 202
 
 

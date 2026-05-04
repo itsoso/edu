@@ -13,11 +13,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '../lib/auth'
 import { colors } from '../lib/theme'
+import { useResponsive } from '../lib/responsive'
 
 const STAGES = ['初一上', '初一下', '初二上', '初二下', '初三上', '初三下']
 
 export default function RegisterScreen({ navigation }: any) {
   const { register } = useAuth()
+  const { hPadding, maxContent } = useResponsive()
   const [role, setRole] = useState<'student' | 'parent'>('student')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -70,8 +72,8 @@ export default function RegisterScreen({ navigation }: any) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
-        <ScrollView contentContainerStyle={styles.scroll}>
-          <View style={styles.card}>
+        <ScrollView contentContainerStyle={[styles.scroll, { paddingHorizontal: hPadding }]}>
+          <View style={[styles.card, maxContent ? { maxWidth: 560, alignSelf: 'center', width: '100%' } : null]}>
             <Text style={styles.title}>注册账号</Text>
 
             <View style={styles.roleRow}>

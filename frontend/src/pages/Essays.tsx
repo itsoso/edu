@@ -10,6 +10,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useToast } from '../components/Toast'
 import EmptyState from '../components/EmptyState'
 import { compressImage, formatBytes } from '../utils/compressImage'
+import signals from '../lib/signals'
 
 const EssayAnalysisView = lazy(() => import('../components/EssayAnalysisView'))
 
@@ -85,6 +86,11 @@ export default function Essays() {
       const r = await compressImage(file)
       setBusy(`上传中 ${formatBytes(r.compressedSize)}...`)
       const essay = await api.uploadEssayFile(r.file, 'photo')
+      signals.track('essay.create', {
+        related_table: 'essays',
+        related_id: essay.id,
+        payload: { source_type: 'photo', word_count: essay.word_count || 0 },
+      })
       setActive(essay)
       toast.info('照片已上传, 点"识别文字"提取正文')
       reload()
@@ -100,6 +106,11 @@ export default function Essays() {
     setBusy('解析 Word...')
     try {
       const essay = await api.uploadEssayFile(file, 'document')
+      signals.track('essay.create', {
+        related_table: 'essays',
+        related_id: essay.id,
+        payload: { source_type: 'document', word_count: essay.word_count || 0 },
+      })
       setActive(essay)
       toast.success(`导入成功, ${essay.word_count} 字`)
       reload()
@@ -123,6 +134,11 @@ export default function Essays() {
         title: textTitle.trim() || undefined,
         essay_type: textType || undefined,
         topic: textTopic.trim() || undefined,
+      })
+      signals.track('essay.create', {
+        related_table: 'essays',
+        related_id: essay.id,
+        payload: { source_type: 'text', word_count: essay.word_count || 0 },
       })
       setActive(essay)
       setTextContent(''); setTextTitle(''); setTextType(''); setTextTopic('')

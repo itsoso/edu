@@ -14,7 +14,7 @@ FULL_MARKS = {"科学": 150, "英语": 120, "数学": 120, "语文": 120, "社�
 
 # Journal 多媒体 (音频/视频)
 JOURNAL_UPLOAD_DIR = BACKEND_DIR / "data" / "uploads" / "journal"
-ALLOWED_MEDIA_EXT = {"webm", "mp4", "m4a", "ogg", "wav"}
+ALLOWED_MEDIA_EXT = {"webm", "mp4", "mov", "m4v", "m4a", "ogg", "wav", "aac", "caf"}
 MAX_MEDIA_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB (视频)
 MAX_AUDIO_DURATION_SECS = 180   # 3 分钟
 MAX_VIDEO_DURATION_SECS = 120   # 2 分钟
