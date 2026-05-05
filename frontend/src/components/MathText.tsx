@@ -99,8 +99,16 @@ function splitByDollar(raw: string): { text: string; isMath: boolean }[] {
     segments.push({ text: match[1], isMath: true })
     lastIndex = regex.lastIndex
   }
-  if (lastIndex < raw.length) {
-    segments.push({ text: raw.slice(lastIndex), isMath: false })
+  // 容错: 余下文本里若有未闭合 $ 且 $ 后含 LaTeX 命令, 把 $ 之后到末尾当作 math.
+  // (LLM 生成时偶尔遗漏闭合 $, 不容错就整段不渲染)
+  const tail = raw.slice(lastIndex)
+  const lonelyDollar = tail.indexOf('$')
+  const hasLatexCmd = /\\(frac|sqrt|cdot|left|right|sum|int|times|div|leq|geq|neq|pm|approx|infty|alpha|beta|theta|pi)\b/.test(tail)
+  if (lonelyDollar >= 0 && hasLatexCmd) {
+    if (lonelyDollar > 0) segments.push({ text: tail.slice(0, lonelyDollar), isMath: false })
+    segments.push({ text: tail.slice(lonelyDollar + 1), isMath: true })
+  } else if (tail.length > 0) {
+    segments.push({ text: tail, isMath: false })
   }
   return segments
 }

@@ -2,31 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- 走 App Store Connect (TestFlight + 上架) 分发 -->
     <key>method</key>
     <string>app-store-connect</string>
-
-    <!-- 与 project.pbxproj DEVELOPMENT_TEAM 一致 -->
     <key>teamID</key>
     <string>QA2U724DAN</string>
-
-    <!-- Xcode 自动生成 distribution profile -->
     <key>signingStyle</key>
     <string>automatic</string>
-
-    <!-- TestFlight 上传后自动 strip swift symbols -->
     <key>stripSwiftSymbols</key>
     <true/>
-
-    <!-- Bitcode 在 Xcode 14+ 已弃用 -->
     <key>uploadBitcode</key>
     <false/>
-
-    <!-- 不上传符号 (TestFlight 内部测试不一定需要) — 改 true 如果要崩溃日志 -->
     <key>uploadSymbols</key>
     <true/>
-
-    <!-- 不要 Xcode 的"管理 app version"对话, 我们自己控 -->
     <key>manageAppVersionAndBuildNumber</key>
     <false/>
 </dict>
