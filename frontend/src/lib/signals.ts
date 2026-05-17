@@ -31,6 +31,9 @@ export type SignalEventType =
   | 'agent.suggestion.shown'
   | 'agent.suggestion.accepted'
   | 'agent.suggestion.dismissed'
+  | 'next_action.shown'
+  | 'next_action.clicked'
+  | 'next_action.completed'
 
 type Payload = Record<string, string | number | boolean | null | undefined>
 

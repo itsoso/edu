@@ -29,15 +29,17 @@ const Feynman = lazy(() => import('./pages/Feynman'))
 const FeynmanHistory = lazy(() => import('./pages/FeynmanHistory'))
 const FeynmanNew = lazy(() => import('./pages/FeynmanNew'))
 const Schedule = lazy(() => import('./pages/Schedule'))
+const Assignments = lazy(() => import('./pages/Assignments'))
 
 const navItems = [
   { to: '/', label: '今日', icon: '🏠', end: true },
-  { to: '/journal', label: '日记', icon: '🕊️' },
+  { to: '/assignments', label: '任务', icon: '📋' },
+  { to: '/journal', label: '我的', icon: '🕊️' },
   { to: '/mistakes', label: '错题本', icon: '📓' },
   { to: '/essays', label: '作文', icon: '📝' },
   { to: '/scan', label: '扫试卷', icon: '📸' },
   { to: '/practice', label: '训练', icon: '🏋️' },
-  { to: '/trends', label: '趋势', icon: '📈' },
+  { to: '/trends', label: '成长', icon: '📈' },
   { to: '/plan', label: '计划', icon: '📅' },
   { to: '/schedule', label: '课程表', icon: '🗓️' },
   { to: '/insights', label: '看见自己', icon: '🪞' },
@@ -49,7 +51,7 @@ const navItems = [
   { to: '/settings', label: '设置', icon: '⚙️' },
 ]
 
-const primaryNavItems = ['/', '/scan', '/mistakes', '/practice', '/trends']
+const primaryNavItems = ['/', '/mistakes', '/practice', '/trends', '/journal']
 
 export default function App() {
   const { user, loading } = useAuth()
@@ -183,11 +185,21 @@ function Shell() {
               <div className="text-lg font-bold text-brand-700">学习系统</div>
               <div className="text-xs text-slate-500 mt-0.5">{userLabel}</div>
             </div>
-            <nav aria-label="主导航" className="flex md:flex-1 md:flex-col md:overflow-visible">
-              {navItems.map((item) => (
-                <ShellNavLink key={item.to} item={item} desktop />
-              ))}
-            </nav>
+            <div className="flex-1 overflow-y-auto py-3">
+              <nav aria-label="主导航" className="flex flex-col">
+                {primaryItems.map((item) => (
+                  <ShellNavLink key={item.to} item={item} desktop />
+                ))}
+              </nav>
+              <div className="px-5 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                更多功能
+              </div>
+              <nav aria-label="更多功能" className="flex flex-col">
+                {secondaryItems.map((item) => (
+                  <ShellNavLink key={item.to} item={item} desktop />
+                ))}
+              </nav>
+            </div>
             <div className="px-5 py-3 border-t border-slate-200">
               <button
                 onClick={logout}
@@ -256,6 +268,7 @@ function Shell() {
             <Route path="/feynman/:id" element={<Feynman />} />
             <Route path="/feynman-history" element={<FeynmanHistory />} />
             <Route path="/schedule" element={<Schedule />} />
+            <Route path="/assignments" element={<Assignments />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </Suspense>

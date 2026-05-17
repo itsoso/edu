@@ -20,14 +20,23 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     },
   })
   if (!res.ok) {
-    let msg = ''
+    // 一些 fetch 实现不允许 body 被读两次, 先 text() 再尝试解析 JSON.
+    let text = ''
     try {
-      const j = await res.json()
-      msg = j.error || j.message || JSON.stringify(j)
+      text = await res.text()
     } catch {
-      msg = await res.text()
+      /* ignore */
     }
-    throw new ApiError(res.status, msg)
+    let msg = text
+    if (text) {
+      try {
+        const j = JSON.parse(text)
+        msg = j.error || j.message || text
+      } catch {
+        /* not JSON */
+      }
+    }
+    throw new ApiError(res.status, msg || `HTTP ${res.status}`)
   }
   // 204 no-content
   if (res.status === 204) return undefined as any
@@ -162,6 +171,7 @@ export type PracticeSet = {
   correct_count?: number
   status?: 'generating' | 'done' | 'failed'
   error_message?: string | null
+  tags: string[]
   created_at: string
   items: PracticeItem[]
 }
@@ -219,6 +229,7 @@ export type Essay = {
   file_path: string | null
   file_name: string | null
   file_url: string | null
+  file_urls?: string[]
   essay_type: string | null
   topic: string | null
   word_count: number
@@ -228,6 +239,20 @@ export type Essay = {
   error_message: string | null
   created_at: string
   updated_at: string
+}
+
+export type Assignment = {
+  id: number
+  student_id: number
+  assigner_user_id: number
+  assigner_name?: string | null
+  kind: 'practice' | 'essay' | 'reading' | 'custom'
+  title: string
+  description: string | null
+  due_date: string | null
+  status: 'pending' | 'completed' | 'cancelled'
+  completed_at: string | null
+  created_at: string
 }
 
 export type Mistake = {
@@ -395,12 +420,41 @@ export const api = {
   },
   createMistake: (data: any) =>
     request<{ id: number }>('/mistakes', { method: 'POST', body: JSON.stringify(data) }),
+  scanSolveMistake: async (file: File, saveAsMistake: boolean) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('save_as_mistake', saveAsMistake ? '1' : '0')
+    const res = await fetch('/api/mistakes/scan-solve', {
+      method: 'POST', credentials: 'include', body: fd,
+    })
+    if (!res.ok) throw new ApiError(res.status, await res.text())
+    return res.json() as Promise<{
+      question_text: string
+      subject: string
+      knowledge_point: string | null
+      difficulty: string
+      answer: string
+      solution_steps: string
+      common_mistakes: string
+      mistake_id?: number
+    }>
+  },
   updateMistake: (id: number, data: any) =>
     request<{ ok: boolean }>(`/mistakes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteMistake: (id: number) =>
     request<{ ok: boolean }>(`/mistakes/${id}`, { method: 'DELETE' }),
   mistakeStats: () =>
     request<{ by_reason: any[]; by_subject: any[] }>('/mistakes/stats'),
+  knowledgeGraph: () =>
+    request<{ nodes: Array<{
+      subject: string
+      knowledge_point: string
+      total: number
+      mastered: number
+      mastery: number
+      weakness_score: number
+      last_seen: string | null
+    }> }>('/mistakes/knowledge-graph'),
 
   // Journal Media (音频/视频)
   uploadJournalMedia: async (
@@ -458,12 +512,17 @@ export const api = {
   }) =>
     request<Essay>('/essays', { method: 'POST', body: JSON.stringify(data) }),
   uploadEssayFile: async (
-    file: File,
+    file: File | File[],
     sourceType: 'photo' | 'document',
     opts?: { title?: string; essay_type?: string; topic?: string }
   ) => {
     const fd = new FormData()
-    fd.append('file', file)
+    const files = Array.isArray(file) ? file : [file]
+    if (files.length === 1) {
+      fd.append('file', files[0])
+    } else {
+      for (const f of files) fd.append('files', f)
+    }
     fd.append('source_type', sourceType)
     if (opts?.title) fd.append('title', opts.title)
     if (opts?.essay_type) fd.append('essay_type', opts.essay_type)
@@ -482,7 +541,48 @@ export const api = {
     request<Essay>(`/essays/${id}/ocr`, { method: 'POST' }),
   triggerEssayAnalysis: (id: number) =>
     request<Essay>(`/essays/${id}/analyze`, { method: 'POST' }),
+  generateEssayModel: (id: number) =>
+    request<{
+      title: string
+      content: string
+      highlights: string[]
+      structure_note: string
+    }>(`/essays/${id}/model-essay`, { method: 'POST' }),
   listEssayTopics: () => request<string[]>('/essays/topics'),
+
+  // Assignments (家长布置任务)
+  listAssignments: (params: { status?: string; mine_assigned?: boolean } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.status) qs.set('status', params.status)
+    if (params.mine_assigned) qs.set('mine_assigned', '1')
+    const q = qs.toString()
+    return request<Assignment[]>(`/assignments${q ? `?${q}` : ''}`)
+  },
+  createAssignment: (data: {
+    title: string
+    description?: string
+    kind?: string
+    due_date?: string
+  }) =>
+    request<Assignment>('/assignments', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateAssignment: (
+    id: number,
+    data: Partial<{
+      status: 'pending' | 'completed' | 'cancelled'
+      title: string
+      description: string | null
+      due_date: string | null
+    }>
+  ) =>
+    request<Assignment>(`/assignments/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteAssignment: (id: number) =>
+    request<{ ok: boolean }>(`/assignments/${id}`, { method: 'DELETE' }),
 
   // Reflections (她的声音 — 永远不喂给 AI)
   listReflections: (params: {
@@ -621,7 +721,17 @@ export const api = {
     request<{ ok: boolean }>(`/reports/monthly/${month}`, { method: 'DELETE' }),
 
   // Practice (二次训练)
-  listPracticeSets: () => request<PracticeSet[]>('/practice'),
+  listPracticeSets: (tag?: string) => {
+    const qs = tag ? `?tag=${encodeURIComponent(tag)}` : ''
+    return request<PracticeSet[]>(`/practice${qs}`)
+  },
+  listPracticeTags: () =>
+    request<Array<{ tag: string; count: number }>>('/practice/tags'),
+  updatePracticeSetTags: (id: number, tags: string[]) =>
+    request<PracticeSet>(`/practice/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags }),
+    }),
   getPracticeSet: (id: number) => request<PracticeSet>(`/practice/${id}`),
   generatePractice: (mistakeId: number, count: number = 3) =>
     request<PracticeSet>(`/mistakes/${mistakeId}/generate-practice`, {
@@ -657,6 +767,8 @@ export const api = {
     }),
 
   // Tutor Agent (P2 主动建议)
+  getNextAction: () =>
+    request<{ exists: boolean; action?: NextAction }>('/agent/next-action'),
   getTodaySuggestion: () =>
     request<{ exists: boolean; suggestion?: AgentSuggestion }>(
       '/agent/suggestion/today'
@@ -1100,4 +1212,17 @@ export type AgentAction = {
   response?: string
   created_at: string
   [k: string]: any
+}
+
+export type NextAction = {
+  kind: 'mistake' | 'practice' | 'task' | string
+  title: string
+  description: string
+  cta_label: string
+  cta_path: string
+  subject?: string | null
+  knowledge_point?: string | null
+  source_mistake_id?: number | null
+  practice_set_id?: number | null
+  task_id?: number | null
 }

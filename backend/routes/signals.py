@@ -41,6 +41,9 @@ ALLOWED_EVENT_TYPES = {
     "agent.suggestion.shown",
     "agent.suggestion.accepted",
     "agent.suggestion.dismissed",
+    "next_action.shown",
+    "next_action.clicked",
+    "next_action.completed",
 }
 
 # payload 字段白名单 (按 event_type → set of allowed keys).
@@ -65,6 +68,9 @@ PAYLOAD_SCHEMA: dict[str, set[str]] = {
     "agent.suggestion.shown": {"agent_name", "suggestion_id"},
     "agent.suggestion.accepted": {"agent_name", "suggestion_id"},
     "agent.suggestion.dismissed": {"agent_name", "suggestion_id"},
+    "next_action.shown": {"kind", "cta_path"},
+    "next_action.clicked": {"kind", "cta_path"},
+    "next_action.completed": {"source_kind", "target_kind"},
 }
 
 # 内容字段黑名单 — 任何 event 的 payload 出现这些 key, 整条事件丢弃

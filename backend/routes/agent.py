@@ -1,6 +1,7 @@
 """Agent API (P2 Tutor + 后续 agents 共用)."""
 import json
 import logging
+from datetime import date
 
 from flask import Blueprint, jsonify, request, g
 
@@ -14,6 +15,150 @@ from agent_tutor import (
 
 bp = Blueprint("agent", __name__)
 log = logging.getLogger(__name__)
+
+
+def _build_next_mistake_action(conn, owner_id: int):
+    row = conn.execute(
+        """SELECT
+               m.id,
+               m.subject,
+               m.reason,
+               m.knowledge_point,
+               COALESCE(kp.repeat_count, 0) AS repeat_count
+           FROM mistakes m
+           LEFT JOIN (
+             SELECT knowledge_point, COUNT(*) AS repeat_count
+             FROM mistakes
+             WHERE owner_user_id = ?
+               AND mastered = 0
+               AND knowledge_point IS NOT NULL
+               AND TRIM(knowledge_point) != ''
+             GROUP BY knowledge_point
+           ) kp ON kp.knowledge_point = m.knowledge_point
+           WHERE m.owner_user_id = ? AND m.mastered = 0
+           ORDER BY
+             CASE WHEN COALESCE(kp.repeat_count, 0) > 1 THEN 1 ELSE 0 END DESC,
+             COALESCE(kp.repeat_count, 0) DESC,
+             datetime(m.created_at) DESC,
+             m.id DESC
+           LIMIT 1""",
+        (owner_id, owner_id),
+    ).fetchone()
+    if not row:
+        return None
+
+    topic = row["knowledge_point"] or row["reason"] or "这道题"
+    return {
+        "kind": "mistake",
+        "title": "先补这道错题",
+        "description": f"{row['subject']} · {topic}",
+        "cta_label": "去错题本",
+        "cta_path": "/mistakes",
+        "subject": row["subject"],
+        "knowledge_point": row["knowledge_point"],
+        "source_mistake_id": row["id"],
+    }
+
+
+def _build_next_practice_action(conn, owner_id: int):
+    row = conn.execute(
+        """SELECT
+               ps.id,
+               ps.title,
+               ps.subject,
+               ps.knowledge_point,
+               COUNT(pi.id) AS item_count,
+               SUM(CASE WHEN pi.is_correct IS NOT NULL THEN 1 ELSE 0 END) AS graded_count,
+               SUM(CASE WHEN pi.is_correct = 1 THEN 1 ELSE 0 END) AS correct_count,
+               SUM(CASE WHEN pi.is_correct = 0 THEN 1 ELSE 0 END) AS wrong_count,
+               AVG(CASE WHEN pi.score IS NOT NULL THEN pi.score END) AS avg_score
+           FROM practice_sets ps
+           JOIN practice_items pi ON pi.set_id = ps.id
+           WHERE ps.owner_user_id = ?
+             AND ps.status = 'done'
+           GROUP BY ps.id, ps.title, ps.subject, ps.knowledge_point, ps.created_at
+           HAVING graded_count < item_count OR correct_count < item_count
+           ORDER BY
+             COALESCE(wrong_count, 0) DESC,
+             COALESCE(avg_score, 101) ASC,
+             (item_count - graded_count) DESC,
+             datetime(ps.created_at) DESC,
+             ps.id DESC
+           LIMIT 1""",
+        (owner_id,),
+    ).fetchone()
+    if not row:
+        return None
+
+    remaining = max((row["item_count"] or 0) - (row["graded_count"] or 0), 0)
+    wrong = max((row["graded_count"] or 0) - (row["correct_count"] or 0), 0)
+    if remaining > 0 and wrong > 0:
+        detail = f"还有 {remaining} 题没做，{wrong} 题要重练"
+    elif remaining > 0:
+        detail = f"还有 {remaining} 题没做"
+    elif wrong > 0:
+        detail = f"还有 {wrong} 题做错了，先补一下"
+    else:
+        detail = "这组训练还没完全稳住"
+
+    return {
+        "kind": "practice",
+        "title": "先把这组训练做完",
+        "description": f"{row['title']} · {detail}",
+        "cta_label": "继续训练",
+        "cta_path": f"/practice?set={row['id']}",
+        "subject": row["subject"],
+        "knowledge_point": row["knowledge_point"],
+        "practice_set_id": row["id"],
+    }
+
+
+def _build_next_task_action(conn, owner_id: int):
+    today = date.today()
+    today_str = today.isoformat()
+    today_dow = today.isoweekday()
+
+    row = conn.execute(
+        """SELECT t.id, t.subject, t.title, t.description, t.minutes
+           FROM tasks t
+           LEFT JOIN checkins c
+             ON c.task_id = t.id
+            AND c.checkin_date = ?
+            AND c.completed = 1
+           WHERE t.owner_user_id = ?
+             AND t.day_of_week = ?
+             AND c.id IS NULL
+           ORDER BY t.week, t.id
+           LIMIT 1""",
+        (today_str, owner_id, today_dow),
+    ).fetchone()
+    if not row:
+        return None
+
+    minutes = row["minutes"] or 15
+    return {
+        "kind": "task",
+        "title": row["title"] or "完成今天任务",
+        "description": f"{row['subject'] or '今日任务'} · 先做 {minutes} 分钟",
+        "cta_label": "去完成",
+        "cta_path": "/assignments",
+        "subject": row["subject"],
+        "task_id": row["id"],
+    }
+
+
+@bp.get("/api/agent/next-action")
+@login_required
+def get_next_action():
+    with db() as conn:
+        action = (
+            _build_next_mistake_action(conn, g.owner_id)
+            or _build_next_practice_action(conn, g.owner_id)
+            or _build_next_task_action(conn, g.owner_id)
+        )
+    if not action:
+        return jsonify({"exists": False})
+    return jsonify({"exists": True, "action": action})
 
 
 @bp.get("/api/agent/suggestion/today")

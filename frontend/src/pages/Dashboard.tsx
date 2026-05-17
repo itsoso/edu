@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, Task, Checkin, AgentSuggestion } from '../api'
+import { api, Task, Checkin, AgentSuggestion, NextAction } from '../api'
 import { useAuth } from '../auth'
 import { usePolling } from '../hooks/usePolling'
 import WeeklyGoalCeremony from '../components/WeeklyGoalCeremony'
@@ -56,10 +56,12 @@ export default function Dashboard() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [tip, setTip] = useState<DailyTip | null>(null)
   const [tipOpen, setTipOpen] = useState(false)
+  const [nextAction, setNextAction] = useState<NextAction | null>(null)
   const [suggestion, setSuggestion] = useState<AgentSuggestion | null>(null)
   const [week, setWeek] = useState(1)
   const [weekNote, setWeekNote] = useState('')
   const [weekNoteSaved, setWeekNoteSaved] = useState(false)
+  const shownNextActionKeyRef = useRef<string>('')
 
   const today = todayStr()
   const dow = dowFromDate(new Date())
@@ -70,7 +72,37 @@ export default function Dashboard() {
   useEffect(() => {
     api.dashboardSummary().then(setSummary).catch(() => {})
     api.dailyTip().then(setTip).catch(() => {})
+    api
+      .getNextAction()
+      .then((r) => setNextAction(r.exists ? r.action || null : null))
+      .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!nextAction) return
+    const key = `${nextAction.kind}:${nextAction.cta_path}`
+    if (shownNextActionKeyRef.current === key) return
+    shownNextActionKeyRef.current = key
+    signals.track('next_action.shown', {
+      related_table:
+        nextAction.kind === 'mistake'
+          ? 'mistakes'
+          : nextAction.kind === 'practice'
+          ? 'practice_sets'
+          : nextAction.kind === 'task'
+          ? 'tasks'
+          : undefined,
+      related_id:
+        nextAction.source_mistake_id ||
+        nextAction.practice_set_id ||
+        nextAction.task_id ||
+        undefined,
+      payload: {
+        kind: nextAction.kind,
+        cta_path: nextAction.cta_path,
+      },
+    })
+  }, [nextAction])
 
   // Tutor Agent 主动建议 (家长不拉)
   useEffect(() => {
@@ -142,6 +174,13 @@ export default function Dashboard() {
     } catch {}
   }
 
+  async function refreshNextAction() {
+    try {
+      const r = await api.getNextAction()
+      setNextAction(r.exists ? r.action || null : null)
+    } catch {}
+  }
+
   async function toggle(task: Task) {
     const done = checkins.some((c) => c.task_id === task.id)
     const completed = !done
@@ -158,6 +197,7 @@ export default function Dashboard() {
     const updated = await api.listCheckins(today)
     setCheckins(updated)
     refreshSummary()
+    refreshNextAction()
   }
 
   const doneCount = tasks.filter((t) => checkins.some((c) => c.task_id === t.id)).length
@@ -191,6 +231,33 @@ export default function Dashboard() {
         <TutorCard
           suggestion={suggestion}
           onResolved={() => setSuggestion(null)}
+        />
+      )}
+
+      {nextAction && (
+        <NextActionCard
+          action={nextAction}
+          onClick={() =>
+            signals.track('next_action.clicked', {
+              related_table:
+                nextAction.kind === 'mistake'
+                  ? 'mistakes'
+                  : nextAction.kind === 'practice'
+                  ? 'practice_sets'
+                  : nextAction.kind === 'task'
+                  ? 'tasks'
+                  : undefined,
+              related_id:
+                nextAction.source_mistake_id ||
+                nextAction.practice_set_id ||
+                nextAction.task_id ||
+                undefined,
+              payload: {
+                kind: nextAction.kind,
+                cta_path: nextAction.cta_path,
+              },
+            })
+          }
         />
       )}
 
@@ -382,6 +449,47 @@ export default function Dashboard() {
   )
 }
 
+function NextActionCard({
+  action,
+  onClick,
+}: {
+  action: NextAction
+  onClick?: () => void
+}) {
+  const badge =
+    action.kind === 'mistake'
+      ? '先补漏洞'
+      : action.kind === 'practice'
+      ? '先巩固'
+      : '然后完成任务'
+
+  return (
+    <div className="rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50 via-white to-amber-50 p-5 shadow-sm">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-700">
+            今天先做这个
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <h2 className="text-xl font-semibold text-slate-900">{action.title}</h2>
+            <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
+              {badge}
+            </span>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{action.description}</p>
+        </div>
+        <Link
+          to={action.cta_path}
+          onClick={onClick}
+          className="inline-flex shrink-0 items-center justify-center rounded-full bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700"
+        >
+          {action.cta_label} →
+        </Link>
+      </div>
+    </div>
+  )
+}
+
 /** 中性描述最近 14 天的打卡状态 — 没有 "连续 X 天" 的心理绑架. */
 function describeRecent(summary: Summary): string {
   const { calendar_14d, month_distinct_days } = summary
@@ -449,6 +557,82 @@ function QuickLink({ to, icon, title, desc }: { to: string; icon: string; title:
   )
 }
 
+function ParentFocusCard({
+  summary,
+  alertTitle,
+}: {
+  summary: Summary | null
+  alertTitle?: string | null
+}) {
+  const mistakeTotal = summary?.mistakes.total || 0
+  const mistakeMastered = summary?.mistakes.mastered || 0
+  const masteredRatio = mistakeTotal > 0 ? Math.round((mistakeMastered / mistakeTotal) * 100) : 0
+  const practiceTotal = summary?.practice.total || 0
+  const practiceCorrect = summary?.practice.correct || 0
+  const practiceRatio = practiceTotal > 0 ? Math.round((practiceCorrect / practiceTotal) * 100) : 0
+
+  const risk =
+    alertTitle ||
+    (mistakeTotal > 0 && masteredRatio < 50
+      ? '错题还没真正压下去'
+      : practiceTotal > 0 && practiceRatio < 60
+      ? '训练正确率还不稳'
+      : '这周没有明显的高风险信号')
+
+  const progress =
+    mistakeTotal === 0
+      ? '这周还没有新增错题记录，可以更多看她是否愿意主动复盘。'
+      : `错题已掌握 ${mistakeMastered} / ${mistakeTotal}，训练正确率 ${practiceRatio}%。`
+
+  const prompt =
+    alertTitle
+      ? '今晚可以先问她：最近哪一步最容易卡住？你想让我怎么配合你？'
+      : masteredRatio >= 50
+      ? '今晚可以先问她：这周哪一类题开始没那么怕了？'
+      : '今晚可以先问她：最近总卡住的是哪一类题？要不要一起把原因说清楚？'
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+          今天最值得看
+        </div>
+        <div className="mt-1 text-sm text-slate-500">
+          不用看全量数据，先看风险、进展和一句今晚怎么聊。
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <FocusStat title="当前风险" body={risk} tone="amber" />
+        <FocusStat title="这周进展" body={progress} tone="emerald" />
+        <FocusStat title="今晚可以怎么聊" body={prompt} tone="slate" />
+      </div>
+    </div>
+  )
+}
+
+function FocusStat({
+  title,
+  body,
+  tone,
+}: {
+  title: string
+  body: string
+  tone: 'amber' | 'emerald' | 'slate'
+}) {
+  const cls =
+    tone === 'amber'
+      ? 'border-amber-200 bg-amber-50'
+      : tone === 'emerald'
+      ? 'border-emerald-200 bg-emerald-50'
+      : 'border-slate-200 bg-slate-50'
+  return (
+    <div className={`rounded-2xl border p-4 ${cls}`}>
+      <div className="text-xs font-semibold text-slate-500">{title}</div>
+      <div className="mt-2 text-sm leading-6 text-slate-700">{body}</div>
+    </div>
+  )
+}
+
 /**
  * 家长首页. 默认不显示孩子任何数据.
  *
@@ -461,6 +645,8 @@ function QuickLink({ to, icon, title, desc }: { to: string; icon: string; title:
  */
 function ParentHome({ displayName, today }: { displayName: string; today: string }) {
   const monthKey = `edu.parentPeeks.${today.slice(0, 7)}`
+  const [summary, setSummary] = useState<Summary | null>(null)
+  const [alertTitle, setAlertTitle] = useState<string | null>(null)
   const [peeks, setPeeks] = useState(() => {
     try {
       return parseInt(localStorage.getItem(monthKey) || '0', 10)
@@ -477,6 +663,16 @@ function ParentHome({ displayName, today }: { displayName: string; today: string
     } catch {}
   }
 
+  useEffect(() => {
+    api.dashboardSummary().then(setSummary).catch(() => {})
+    api.getGuardianAlerts()
+      .then((alerts) => {
+        const first = Array.isArray(alerts) && alerts.length > 0 ? alerts[0] : null
+        setAlertTitle(first?.title || null)
+      })
+      .catch(() => {})
+  }, [])
+
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
@@ -487,6 +683,8 @@ function ParentHome({ displayName, today }: { displayName: string; today: string
       </div>
 
       <GuardianAlerts />
+
+      <ParentFocusCard summary={summary} alertTitle={alertTitle} />
 
       {/* 周末课程接送安排 — 家长视角 */}
       <WeekendCoursesCard />

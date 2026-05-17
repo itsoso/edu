@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { api, PracticeSet, PracticeItem } from '../api'
+import { Link, useSearchParams } from 'react-router-dom'
+import { api, PracticeSet, PracticeItem, NextAction } from '../api'
 import signals from '../lib/signals'
 import { usePolling } from '../hooks/usePolling'
 import EmptyState from '../components/EmptyState'
@@ -11,6 +11,7 @@ import ReflectionPrompt from '../components/ReflectionPrompt'
 import { buildPrintablePayload, openPrintWindow } from '../print/printable'
 
 export default function Practice() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [sets, setSets] = useState<PracticeSet[]>([])
   const [active, setActive] = useState<PracticeSet | null>(null)
   const [err, setErr] = useState('')
@@ -18,10 +19,23 @@ export default function Practice() {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set())
   const [printOpen, setPrintOpen] = useState(false)
   const [printing, setPrinting] = useState(false)
+  const [filterTag, setFilterTag] = useState<string>('')
+  const [allTags, setAllTags] = useState<Array<{ tag: string; count: number }>>([])
+  const [editingTags, setEditingTags] = useState(false)
+  const [draftTagText, setDraftTagText] = useState('')
+  const [completionAction, setCompletionAction] = useState<NextAction | null>(null)
+  const [completionActionLoaded, setCompletionActionLoaded] = useState(false)
+  const completionTrackedSetIdRef = useRef<number | null>(null)
+  const requestedSetId = Number(searchParams.get('set') || 0)
+  const activeSetCompleted =
+    !!active &&
+    active.status === 'done' &&
+    active.items.length > 0 &&
+    active.items.every((item) => item.is_correct !== null)
 
   async function reload() {
     try {
-      const data = await api.listPracticeSets()
+      const data = await api.listPracticeSets(filterTag || undefined)
       setSets(data)
       if (active && !data.find((x) => x.id === active.id)) {
         setActive(null)
@@ -32,7 +46,9 @@ export default function Practice() {
         }
       } else if (data.length > 0) {
         // 首屏先渲染列表, 详情异步加载, 避免页面被一整套题目阻塞。
-        void openSet(data[0].id, data[0])
+        const preferred =
+          (requestedSetId ? data.find((set) => set.id === requestedSetId) : null) || data[0]
+        void openSet(preferred.id, preferred)
       }
     } catch (e: any) {
       setErr(e.message || String(e))
@@ -40,6 +56,11 @@ export default function Practice() {
   }
 
   async function openSet(id: number, summary?: PracticeSet) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('set', String(id))
+      return next
+    }, { replace: true })
     const base = summary || sets.find((set) => set.id === id)
     if (base) {
       setActive((prev) => (prev?.id === id ? { ...prev, ...base } : { ...base, items: [] }))
@@ -58,7 +79,53 @@ export default function Practice() {
 
   useEffect(() => {
     reload()
-  }, [])
+    api.listPracticeTags().then(setAllTags).catch(() => {})
+  }, [filterTag])
+
+  useEffect(() => {
+    if (!activeSetCompleted || !active) {
+      setCompletionAction(null)
+      setCompletionActionLoaded(false)
+      return
+    }
+    let cancelled = false
+    void api
+      .getNextAction()
+      .then((res) => {
+        if (cancelled) return
+        const action = res.exists ? res.action || null : null
+        if (action?.kind === 'practice' && action.practice_set_id === active.id) {
+          setCompletionAction(null)
+          setCompletionActionLoaded(true)
+          return
+        }
+        setCompletionAction(action)
+        setCompletionActionLoaded(true)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCompletionAction(null)
+          setCompletionActionLoaded(true)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [active?.id, activeSetCompleted])
+
+  useEffect(() => {
+    if (!activeSetCompleted || !active || !completionActionLoaded) return
+    if (completionTrackedSetIdRef.current === active.id) return
+    completionTrackedSetIdRef.current = active.id
+    signals.track('next_action.completed', {
+      related_table: 'practice_sets',
+      related_id: active.id,
+      payload: {
+        source_kind: 'practice',
+        target_kind: completionAction?.kind || 'today',
+      },
+    })
+  }, [active?.id, activeSetCompleted, completionAction?.kind])
 
   // 当 active set 正在生成中时轮询
   const isGenerating = active?.status === 'generating'
@@ -69,7 +136,7 @@ export default function Practice() {
       setActive(s)
       // 完成后刷一下 list 让侧栏也更新
       if (s.status !== 'generating') {
-        api.listPracticeSets().then(setSets).catch(() => {})
+        api.listPracticeSets(filterTag || undefined).then(setSets).catch(() => {})
       }
       return s
     },
@@ -129,6 +196,35 @@ export default function Practice() {
         </p>
       </div>
 
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-2 items-center text-xs">
+          <span className="text-slate-500">标签:</span>
+          <button
+            onClick={() => setFilterTag('')}
+            className={`px-2 py-1 rounded-full border ${
+              filterTag === ''
+                ? 'bg-brand-600 text-white border-brand-600'
+                : 'border-slate-300 text-slate-600'
+            }`}
+          >
+            全部
+          </button>
+          {allTags.map((t) => (
+            <button
+              key={t.tag}
+              onClick={() => setFilterTag(t.tag === filterTag ? '' : t.tag)}
+              className={`px-2 py-1 rounded-full border ${
+                filterTag === t.tag
+                  ? 'bg-brand-600 text-white border-brand-600'
+                  : 'border-slate-300 text-slate-600'
+              }`}
+            >
+              {t.tag} <span className="opacity-60">({t.count})</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {err && <div className="text-sm text-red-600">{err}</div>}
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
@@ -185,14 +281,89 @@ export default function Practice() {
             />
           ) : (
             <>
-              <div className="bg-white border border-slate-200 rounded-lg p-4 flex items-center justify-between">
-                <div>
+              <div className="bg-white border border-slate-200 rounded-lg p-4 flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
                   <div className="font-semibold">{active.title}</div>
                   <div className="text-xs text-slate-500">
                     {active.subject} · {active.knowledge_point}
                   </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {(active.tags || []).map((t) => (
+                      <span
+                        key={t}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full"
+                      >
+                        🏷️ {t}
+                        {editingTags && (
+                          <button
+                            onClick={async () => {
+                              const next = (active.tags || []).filter((x) => x !== t)
+                              try {
+                                const u = await api.updatePracticeSetTags(active.id, next)
+                                setActive(u)
+                                api.listPracticeTags().then(setAllTags).catch(() => {})
+                              } catch {/* */}
+                            }}
+                            className="text-amber-700 hover:text-red-600"
+                            aria-label="删除"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                    {!editingTags ? (
+                      <button
+                        onClick={() => setEditingTags(true)}
+                        className="text-xs text-slate-500 hover:text-brand-700"
+                      >
+                        + 标签
+                      </button>
+                    ) : (
+                      <form
+                        onSubmit={async (e) => {
+                          e.preventDefault()
+                          const t = draftTagText.trim()
+                          if (!t) {
+                            setEditingTags(false)
+                            return
+                          }
+                          if ((active.tags || []).includes(t)) {
+                            setDraftTagText('')
+                            setEditingTags(false)
+                            return
+                          }
+                          const next = [...(active.tags || []), t]
+                          try {
+                            const u = await api.updatePracticeSetTags(active.id, next)
+                            setActive(u)
+                            api.listPracticeTags().then(setAllTags).catch(() => {})
+                          } catch (err: any) {
+                            setErr(err?.message || String(err))
+                          } finally {
+                            setDraftTagText('')
+                            setEditingTags(false)
+                          }
+                        }}
+                        className="inline-flex items-center gap-1"
+                      >
+                        <input
+                          autoFocus
+                          value={draftTagText}
+                          onChange={(e) => setDraftTagText(e.target.value)}
+                          onBlur={() => {
+                            setEditingTags(false)
+                            setDraftTagText('')
+                          }}
+                          maxLength={20}
+                          placeholder="新标签"
+                          className="border border-slate-300 rounded px-2 py-0.5 text-xs w-24"
+                        />
+                      </form>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     onClick={() => setPrintOpen(true)}
                     className="rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-600"
@@ -217,6 +388,33 @@ export default function Practice() {
                   </button>
                   <button onClick={() => setSelectedItemIds(new Set())}>清空勾选</button>
                   <span>已勾选 {selectedItemIds.size} 题</span>
+                </div>
+              )}
+
+              {activeSetCompleted && (
+                <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-brand-50 p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-emerald-800">做完这一组了</div>
+                      <div className="mt-1 text-sm text-slate-600">
+                        {completionAction?.description || '先回到今天的主线，继续做下一步。'}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Link
+                        to={completionAction?.cta_path || '/'}
+                        className="inline-flex items-center justify-center rounded-full bg-brand-600 px-4 py-2 text-sm font-medium text-white"
+                      >
+                        {completionAction?.cta_label || '回到今日'} →
+                      </Link>
+                      <Link
+                        to="/"
+                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600"
+                      >
+                        稍后再说
+                      </Link>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -268,7 +466,7 @@ export default function Practice() {
                           : prev
                       )
                       // 同步侧栏摘要计数
-                      api.listPracticeSets().then(setSets).catch(() => {})
+                      api.listPracticeSets(filterTag || undefined).then(setSets).catch(() => {})
                     }}
                   />
                 ))}
