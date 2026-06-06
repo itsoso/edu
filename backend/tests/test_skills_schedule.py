@@ -14,7 +14,36 @@ def test_lists_schedule_query_skill(client):
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["skills"][0]["name"] == "schedule.query"
+    assert body["skills"][0]["auth"]["type"] == "bearer"
     assert body["skills"][0]["input_schema"]["properties"]["date"]["type"] == "string"
+    assert body["skills"][0]["endpoints"]["skill_url"].endswith("/api/skills/schedule.query/SKILL.md")
+
+
+def test_schedule_query_skill_exposes_public_install_assets(client):
+    manifest_resp = client.get("/api/skills/schedule.query/manifest.json")
+    skill_resp = client.get("/api/skills/schedule.query/SKILL.md")
+    openapi_resp = client.get("/api/skills/schedule.query/openapi.json")
+    well_known_resp = client.get("/.well-known/edu-skills.json")
+
+    assert manifest_resp.status_code == 200
+    manifest = manifest_resp.get_json()
+    assert manifest["name"] == "schedule.query"
+    assert manifest["install"]["openclaw"]["requires_env"] == ["EDU_BEARER_TOKEN"]
+    assert manifest["install"]["hermes"]["url"].endswith("/api/skills/schedule.query/SKILL.md")
+
+    assert skill_resp.status_code == 200
+    skill_md = skill_resp.get_data(as_text=True)
+    assert "name: edu-course-schedule" in skill_md
+    assert "EDU_BEARER_TOKEN" in skill_md
+    assert "/api/skills/schedule.query/invoke" in skill_md
+
+    assert openapi_resp.status_code == 200
+    openapi = openapi_resp.get_json()
+    assert openapi["components"]["securitySchemes"]["bearerAuth"]["scheme"] == "bearer"
+    assert "/api/skills/schedule.query/invoke" in openapi["paths"]
+
+    assert well_known_resp.status_code == 200
+    assert well_known_resp.get_json()["skills"][0]["name"] == "schedule.query"
 
 
 def test_schedule_query_skill_requires_authentication(client):
