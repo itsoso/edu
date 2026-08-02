@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS scores (
     exam_id   INTEGER NOT NULL,
     subject   TEXT    NOT NULL,
     score     REAL    NOT NULL,
+    subject_rank INTEGER,
     full_mark REAL,
     FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
 );
@@ -115,6 +116,7 @@ CREATE TABLE IF NOT EXISTS practice_sets (
     knowledge_point   TEXT,
     status            TEXT    DEFAULT 'done',       -- generating|done|failed
     error_message     TEXT,
+    tags              TEXT,                          -- JSON 数组, 如 ["专项突破", "中考真题"]
     created_at        TEXT    DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (owner_user_id)     REFERENCES users(id)     ON DELETE CASCADE,
     FOREIGN KEY (source_mistake_id) REFERENCES mistakes(id)  ON DELETE SET NULL
@@ -319,6 +321,7 @@ CREATE TABLE IF NOT EXISTS essays (
     ocr_result_json TEXT,
     analysis_json   TEXT,
     error_message   TEXT,
+    extra_files     TEXT,                          -- JSON 数组, 相对路径; 多图作文时存第 2~N 张
     created_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
     updated_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -327,6 +330,24 @@ CREATE TABLE IF NOT EXISTS essays (
 CREATE INDEX IF NOT EXISTS idx_essays_owner    ON essays(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_essays_type     ON essays(owner_user_id, essay_type);
 CREATE INDEX IF NOT EXISTS idx_essays_topic    ON essays(owner_user_id, topic);
+
+-- 范文生成后台任务. 任务只保存作文元数据生成的结果, 不复制学生原文.
+CREATE TABLE IF NOT EXISTS essay_model_jobs (
+    id               TEXT PRIMARY KEY,
+    owner_user_id    INTEGER NOT NULL,
+    essay_id         INTEGER NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'processing', -- processing|done|failed
+    result_json      TEXT,
+    error_code       TEXT,
+    error_message    TEXT,
+    created_at       TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (essay_id) REFERENCES essays(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_essay_model_jobs_owner
+    ON essay_model_jobs(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_owner    ON llm_calls(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_date     ON llm_calls(created_at DESC);
 
@@ -537,13 +558,57 @@ CREATE INDEX IF NOT EXISTS idx_courses_owner_day
     ON courses(owner_user_id, weekday, start_time);
 -- 注意: idx_courses_owner_date(specific_date) 在 _run_migrations 里建,
 -- 避免旧库升级时 SCHEMA 尝试建索引撞上还不存在的列.
+
+-- 拍照解题后台任务. 原图只保留到任务完成, 结果按 owner 隔离.
+CREATE TABLE IF NOT EXISTS scan_solve_jobs (
+    id               TEXT PRIMARY KEY,
+    owner_user_id    INTEGER NOT NULL,
+    file_path        TEXT NOT NULL,
+    save_as_mistake  INTEGER NOT NULL DEFAULT 0,
+    status           TEXT NOT NULL DEFAULT 'processing', -- processing|done|failed
+    result_json      TEXT,
+    error_code       TEXT,
+    error_message    TEXT,
+    created_at       TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_solve_jobs_owner
+    ON scan_solve_jobs(owner_user_id, created_at DESC);
+
+-- 家长布置任务 / 学生待办
+-- student_id: 任务接收者 (学生 user.id)
+-- assigner_user_id: 布置者 (家长 user.id; 学生自己布置时 = student_id, 即 self-assigned)
+-- kind: 'practice' | 'essay' | 'reading' | 'custom'
+-- status: 'pending' | 'completed' | 'cancelled'
+CREATE TABLE IF NOT EXISTS assignments (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id        INTEGER NOT NULL,
+    assigner_user_id  INTEGER NOT NULL,
+    kind              TEXT    NOT NULL DEFAULT 'custom',
+    title             TEXT    NOT NULL,
+    description       TEXT,
+    due_date          TEXT,                          -- YYYY-MM-DD, 可空
+    status            TEXT    NOT NULL DEFAULT 'pending',
+    completed_at      TEXT,
+    created_at        TEXT    DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (assigner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_assignments_student
+    ON assignments(student_id, status, due_date);
 """
 
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 
 
@@ -636,6 +701,18 @@ def _run_migrations(conn):
             "CREATE INDEX IF NOT EXISTS idx_courses_owner_date "
             "ON courses(owner_user_id, specific_date)"
         )
+    # essays: 多图作文 (最多 9 张), extra_files 存第 2~N 张相对路径的 JSON 数组
+    if _table_exists(conn, "essays"):
+        if not _column_exists(conn, "essays", "extra_files"):
+            conn.execute("ALTER TABLE essays ADD COLUMN extra_files TEXT")
+    # practice_sets: 自定义标签 (JSON 数组)
+    if _table_exists(conn, "practice_sets"):
+        if not _column_exists(conn, "practice_sets", "tags"):
+            conn.execute("ALTER TABLE practice_sets ADD COLUMN tags TEXT")
+    # scores: 单科排名. 录入成绩单时结构化保存, 供考试复盘/next-action 使用.
+    if _table_exists(conn, "scores"):
+        if not _column_exists(conn, "scores", "subject_rank"):
+            conn.execute("ALTER TABLE scores ADD COLUMN subject_rank INTEGER")
 
 
 def init_db():

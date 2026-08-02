@@ -32,8 +32,6 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
 	<key>NSCameraUsageDescription</key>
 	<string>拍摄试卷照片用于 AI 识别错题, 或拍摄作文进行批改</string>
 	<key>NSPhotoLibraryUsageDescription</key>

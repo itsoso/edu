@@ -3,7 +3,7 @@
  * Web 版导出 useToast() hook, 我们保持相同 API.
  */
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { Animated, StyleSheet, Text, View } from 'react-native'
+import { Animated, StyleSheet, Text } from 'react-native'
 import { colors } from '../lib/theme'
 
 type ToastKind = 'success' | 'error' | 'info'

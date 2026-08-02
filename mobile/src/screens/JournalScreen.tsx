@@ -6,7 +6,7 @@
  *   - 文字永远不被 AI 分析.
  *   - 音视频默认不分析, 用户可以显式 opt-in.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   View,
   Text,

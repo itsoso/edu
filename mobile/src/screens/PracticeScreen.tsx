@@ -87,12 +87,14 @@ export default function PracticeScreen() {
   // 轮询 generating — 两种情况:
   //   1. 详情里 active.status === 'generating'
   //   2. 列表里任一 set.status === 'generating' (用户可能已退回列表)
+  const activeId = active?.id
+  const activeStatus = active?.status
   useEffect(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current)
       pollRef.current = null
     }
-    const activeGenerating = active?.status === 'generating'
+    const activeGenerating = activeStatus === 'generating'
     const listGenerating = sets.some((s) => s.status === 'generating')
     if (!activeGenerating && !listGenerating) return
 
@@ -102,8 +104,8 @@ export default function PracticeScreen() {
         const list = await api.listPracticeSets()
         setSets(list)
         // 如果当前打开的 set 在生成中, 也更新 active
-        if (active && active.status === 'generating') {
-          const s = await api.getPracticeSet(active.id)
+        if (activeId && activeStatus === 'generating') {
+          const s = await api.getPracticeSet(activeId)
           setActive((prev) => (prev && prev.id === s.id ? s : prev))
         }
       } catch {
@@ -117,7 +119,7 @@ export default function PracticeScreen() {
         pollRef.current = null
       }
     }
-  }, [active?.id, active?.status, sets])
+  }, [activeId, activeStatus, sets])
 
   const removeSet = useCallback(
     (id: number) => {
@@ -394,6 +396,7 @@ function ItemCard({
   const hintTrackedRef = useRef<boolean>(false)
 
   useEffect(() => {
+    const mountedAt = mountedAtRef.current
     signals.track('practice.item.start', {
       related_table: 'practice_items',
       related_id: item.id,
@@ -405,7 +408,7 @@ function ItemCard({
     return () => {
       if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current)
       if (!submittedRef.current) {
-        const elapsed = Math.round((Date.now() - mountedAtRef.current) / 1000)
+        const elapsed = Math.round((Date.now() - mountedAt) / 1000)
         signals.track('practice.item.skip', {
           related_table: 'practice_items',
           related_id: item.id,

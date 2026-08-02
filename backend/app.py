@@ -48,6 +48,8 @@ from routes.curator import bp as curator_bp
 from routes.coach import bp as coach_bp
 from routes.guardian import bp as guardian_bp
 from routes.schedule import bp as schedule_bp
+from routes.assignments import bp as assignments_bp
+from routes.user_export import bp as user_export_bp
 
 
 def create_app() -> Flask:
@@ -79,7 +81,8 @@ def create_app() -> Flask:
                uploads_bp, practice_bp, reports_bp, content_bp,
                admin_stats_bp, reflections_bp, goals_bp, journal_media_bp,
                essays_bp, signals_bp, profile_bp, agent_bp, feynman_bp,
-               reflector_bp, curator_bp, coach_bp, guardian_bp, schedule_bp):
+               reflector_bp, curator_bp, coach_bp, guardian_bp, schedule_bp,
+               assignments_bp, user_export_bp):
         app.register_blueprint(bp)
 
     # 启动后台清理 daemon (30 天前的试卷原图). 幂等, 多 worker 每个进程自己起.

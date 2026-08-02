@@ -4,6 +4,7 @@
 后台填 items, 前端轮询 GET /api/practice/:id 直到 status=done.
 单题批改依然同步 (5 秒, 不是痛点).
 """
+import json
 import logging
 
 from flask import Blueprint, jsonify, request, abort, g
@@ -22,6 +23,16 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("practice", __name__)
 
 
+def _parse_tags(raw):
+    if not raw:
+        return []
+    try:
+        v = json.loads(raw)
+        return [str(x) for x in v] if isinstance(v, list) else []
+    except Exception:
+        return []
+
+
 def _set_to_dict(conn, s_row):
     d = row_to_dict(s_row)
     items = conn.execute(
@@ -29,6 +40,7 @@ def _set_to_dict(conn, s_row):
         (d["id"],),
     ).fetchall()
     d["items"] = rows_to_dicts(items)
+    d["tags"] = _parse_tags(d.get("tags"))
     return d
 
 
@@ -38,6 +50,7 @@ def _set_summary_to_dict(s_row):
     d["item_count"] = d.get("item_count") or 0
     d["graded_count"] = d.get("graded_count") or 0
     d["correct_count"] = d.get("correct_count") or 0
+    d["tags"] = _parse_tags(d.get("tags"))
     return d
 
 
@@ -50,29 +63,92 @@ def list_practice_sets():
     except ValueError:
         limit, offset = 50, 0
 
+    tag = (request.args.get("tag") or "").strip()
+    where_clauses = ["ps.owner_user_id = ?"]
+    args: list = [g.owner_id]
+    if tag:
+        # SQLite 不支持 JSON 操作符, 用 LIKE 兜底匹配; tag 是单值, 安全
+        where_clauses.append("ps.tags LIKE ?")
+        args.append(f'%"{tag}"%')
+    where_sql = " AND ".join(where_clauses)
+
     with db() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) FROM practice_sets WHERE owner_user_id = ?",
-            (g.owner_id,),
+            f"SELECT COUNT(*) FROM practice_sets ps WHERE {where_sql}",
+            args,
         ).fetchone()[0]
         rows = conn.execute(
-            """SELECT ps.*,
+            f"""SELECT ps.*,
                       COUNT(pi.id) AS item_count,
                       SUM(CASE WHEN pi.is_correct IS NOT NULL THEN 1 ELSE 0 END) AS graded_count,
                       SUM(CASE WHEN pi.is_correct = 1 THEN 1 ELSE 0 END) AS correct_count
                FROM practice_sets ps
                LEFT JOIN practice_items pi ON pi.set_id = ps.id
-               WHERE ps.owner_user_id = ?
+               WHERE {where_sql}
                GROUP BY ps.id
                ORDER BY ps.created_at DESC
                LIMIT ? OFFSET ?""",
-            (g.owner_id, limit, offset),
+            args + [limit, offset],
         ).fetchall()
         out = [_set_summary_to_dict(r) for r in rows]
     resp = jsonify(out)
     resp.headers["X-Total-Count"] = str(total)
     resp.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
     return resp
+
+
+@bp.get("/api/practice/tags")
+@login_required
+def list_practice_tags():
+    """聚合本人所有 practice_sets 用过的 tags."""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT tags FROM practice_sets WHERE owner_user_id = ? AND tags IS NOT NULL",
+            (g.owner_id,),
+        ).fetchall()
+    seen: dict[str, int] = {}
+    for r in rows:
+        for t in _parse_tags(r["tags"]):
+            seen[t] = seen.get(t, 0) + 1
+    items = sorted(seen.items(), key=lambda x: (-x[1], x[0]))
+    return jsonify([{"tag": t, "count": c} for t, c in items])
+
+
+@bp.put("/api/practice/<int:set_id>")
+@login_required
+def update_practice_set(set_id):
+    """更新 practice_set 标签 (目前仅开放 tags 编辑)."""
+    payload = request.get_json(force=True) or {}
+    raw_tags = payload.get("tags")
+    if raw_tags is None:
+        return jsonify({"error": "tags_required"}), 400
+    if not isinstance(raw_tags, list):
+        return jsonify({"error": "tags_must_be_list"}), 400
+    # 去重 + 清洗
+    cleaned: list[str] = []
+    for t in raw_tags:
+        s = str(t or "").strip()
+        if s and s not in cleaned and len(s) <= 20:
+            cleaned.append(s)
+    if len(cleaned) > 8:
+        return jsonify({"error": "too_many_tags", "max": 8}), 400
+    tags_json = json.dumps(cleaned, ensure_ascii=False) if cleaned else None
+    with db() as conn:
+        row = conn.execute(
+            "SELECT owner_user_id FROM practice_sets WHERE id = ?", (set_id,)
+        ).fetchone()
+        if not row:
+            abort(404)
+        if row["owner_user_id"] != g.owner_id:
+            abort(403)
+        conn.execute(
+            "UPDATE practice_sets SET tags = ? WHERE id = ?",
+            (tags_json, set_id),
+        )
+        out = conn.execute(
+            "SELECT * FROM practice_sets WHERE id = ?", (set_id,)
+        ).fetchone()
+        return jsonify(_set_to_dict(conn, out))
 
 
 @bp.get("/api/practice/<int:set_id>")
@@ -144,6 +220,20 @@ def _run_generate_practice_bg(
 
 @bp.post("/api/mistakes/<int:mid>/generate-practice")
 @login_required
+def generate_practice_from_mistake(mid):
+    """异步创建训练题集. 立即返回占位 set (status=generating) + 空 items."""
+    payload = request.get_json(force=True) or {}
+    count = max(1, min(int(payload.get("count", 3)), 6))
+
+    set_id = _create_practice_set_for_mistake(g.owner_id, mid, count)
+    if set_id is None:
+        abort(404)
+    with db() as conn:
+        row = conn.execute("SELECT * FROM practice_sets WHERE id = ?", (set_id,)).fetchone()
+        resp = _set_to_dict(conn, row)
+    return jsonify(resp), 202
+
+
 def _create_practice_set_for_mistake(owner_id: int, mid: int, count: int) -> int | None:
     """共享 helper: 给一道错题创建一个 practice_set (status=generating) + 提交后台 LLM 任务.
     返回 set_id 或 None (mistake 不存在/不属本人).
@@ -177,20 +267,6 @@ def _create_practice_set_for_mistake(owner_id: int, mid: int, count: int) -> int
         }
     bg_submit(_run_generate_practice_bg, set_id, mistake_snapshot, count, owner_id)
     return set_id
-
-
-def generate_practice_from_mistake(mid):
-    """异步创建训练题集. 立即返回占位 set (status=generating) + 空 items."""
-    payload = request.get_json(force=True) or {}
-    count = max(1, min(int(payload.get("count", 3)), 6))
-
-    set_id = _create_practice_set_for_mistake(g.owner_id, mid, count)
-    if set_id is None:
-        abort(404)
-    with db() as conn:
-        row = conn.execute("SELECT * FROM practice_sets WHERE id = ?", (set_id,)).fetchone()
-        resp = _set_to_dict(conn, row)
-    return jsonify(resp), 202
 
 
 @bp.post("/api/practice/items/<int:item_id>/grade")

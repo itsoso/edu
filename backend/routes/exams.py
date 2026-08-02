@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, request, abort, g
 from db import db, row_to_dict
 from auth import login_required
 from constants import FULL_MARKS
+from exam_insights import build_latest_exam_insight
 
 bp = Blueprint("exams", __name__)
 
@@ -23,7 +24,10 @@ def list_exams():
             (g.owner_id,),
         ).fetchone()[0]
         rows = conn.execute(
-            """SELECT e.*, GROUP_CONCAT(s.subject || ':' || s.score, '|') AS scores_raw
+            """SELECT e.*,
+                      GROUP_CONCAT(
+                          s.subject || ':' || s.score || ':' || COALESCE(s.subject_rank, '')
+                      , '|') AS scores_raw
                FROM exams e LEFT JOIN scores s ON s.exam_id = e.id
                WHERE e.owner_user_id = ?
                GROUP BY e.id
@@ -36,15 +40,23 @@ def list_exams():
         d = row_to_dict(r)
         raw = d.pop("scores_raw", None) or ""
         score_map = {}
+        rank_map = {}
         if raw:
             for piece in raw.split("|"):
                 if ":" in piece:
-                    sub, sc = piece.split(":", 1)
+                    parts = piece.split(":")
+                    sub = parts[0]
                     try:
-                        score_map[sub] = float(sc)
-                    except ValueError:
+                        score_map[sub] = float(parts[1])
+                    except (ValueError, IndexError):
                         pass
+                    if len(parts) >= 3 and parts[2] != "":
+                        try:
+                            rank_map[sub] = int(float(parts[2]))
+                        except ValueError:
+                            pass
         d["scores"] = score_map
+        d["score_ranks"] = rank_map
         exams.append(d)
     resp = jsonify(exams)
     resp.headers["X-Total-Count"] = str(total)
@@ -60,6 +72,7 @@ def create_exam():
     if not name:
         abort(400, "exam_name required")
     scores = payload.get("scores") or {}
+    score_ranks = payload.get("score_ranks") or {}
     with db() as conn:
         max_order = conn.execute(
             "SELECT COALESCE(MAX(sort_order), 0) AS m FROM exams WHERE owner_user_id = ?",
@@ -88,11 +101,21 @@ def create_exam():
         for subject, score in scores.items():
             if score is None:
                 continue
+            rank = score_ranks.get(subject)
             conn.execute(
-                "INSERT INTO scores (exam_id, subject, score, full_mark) VALUES (?, ?, ?, ?)",
-                (exam_id, subject, score, FULL_MARKS.get(subject)),
+                """INSERT INTO scores (exam_id, subject, score, subject_rank, full_mark)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (exam_id, subject, score, rank, FULL_MARKS.get(subject)),
             )
     return jsonify({"id": exam_id}), 201
+
+
+@bp.get("/api/exams/insights/latest")
+@login_required
+def latest_exam_insight():
+    with db() as conn:
+        payload = build_latest_exam_insight(conn, g.owner_id)
+    return jsonify(payload)
 
 
 @bp.delete("/api/exams/<int:exam_id>")
@@ -135,7 +158,7 @@ def scores_trend():
         if exam_ids:
             placeholders = ",".join("?" * len(exam_ids))
             scores = conn.execute(
-                f"""SELECT s.exam_id, s.subject, s.score, s.full_mark
+                f"""SELECT s.exam_id, s.subject, s.score, s.full_mark, s.subject_rank
                    FROM scores s
                    WHERE s.exam_id IN ({placeholders})""",
                 exam_ids,
@@ -145,7 +168,9 @@ def scores_trend():
     by_exam = {}
     for s in scores:
         by_exam.setdefault(s["exam_id"], {})[s["subject"]] = {
-            "score": s["score"], "full_mark": s["full_mark"],
+            "score": s["score"],
+            "full_mark": s["full_mark"],
+            "subject_rank": s["subject_rank"],
         }
     series = []
     for e in exams:

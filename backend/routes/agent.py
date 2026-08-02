@@ -7,6 +7,7 @@ from flask import Blueprint, jsonify, request, g
 
 from auth import login_required
 from db import db, rows_to_dicts
+from exam_insights import build_latest_exam_insight
 from agent_tutor import (
     maybe_generate_for_user,
     _get_active_suggestion,
@@ -147,6 +148,40 @@ def _build_next_task_action(conn, owner_id: int):
     }
 
 
+def _build_exam_gap_action(conn, owner_id: int):
+    insight = build_latest_exam_insight(conn, owner_id)
+    if not insight.get("exists"):
+        return None
+    focus = insight.get("focus_subjects") or []
+    if not focus:
+        return None
+    top = focus[0]
+    evidence_parts = [
+        f"{insight['latest_exam']['exam_name']}",
+        f"{top['subject']} {top['latest_score']}/{top['full_mark']}",
+    ]
+    if top.get("subject_rank") is not None:
+        evidence_parts.append(f"单科排名 {top['subject_rank']}")
+    if top.get("delta_from_previous") is not None:
+        evidence_parts.append(f"较上次 {top['delta_from_previous']:+g}")
+
+    return {
+        "kind": "exam_gap",
+        "title": f"先修复{top['subject']}缺口",
+        "description": top.get("recommendation") or "根据最近考试做一次短复盘",
+        "cta_label": "看考试复盘",
+        "cta_path": "/trends",
+        "subject": top["subject"],
+        "exam_id": insight["latest_exam"]["id"],
+        "estimated_minutes": 20,
+        "reason": {
+            "primary": "最近考试暴露了最优先修复的学科缺口",
+            "evidence": " · ".join(evidence_parts),
+            "confidence": "high" if top.get("subject_rank") is not None else "medium",
+        },
+    }
+
+
 @bp.get("/api/agent/next-action")
 @login_required
 def get_next_action():
@@ -154,6 +189,7 @@ def get_next_action():
         action = (
             _build_next_mistake_action(conn, g.owner_id)
             or _build_next_practice_action(conn, g.owner_id)
+            or _build_exam_gap_action(conn, g.owner_id)
             or _build_next_task_action(conn, g.owner_id)
         )
     if not action:

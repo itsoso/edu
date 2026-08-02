@@ -433,6 +433,24 @@ export default function Settings() {
         </button>
       </div>
 
+      {/* 数据导出 */}
+      <div className="bg-white border border-slate-200 rounded-lg p-5 space-y-3">
+        <div>
+          <div className="font-semibold text-slate-800">📦 导出我的数据</div>
+          <div className="text-xs text-slate-600 mt-1">
+            下载一份 JSON 文件,包含你 (或你绑定的孩子) 的全部学习数据:错题、作文、考试、训练、任务、月度报告 等。
+            媒体文件 (图片/视频) 不在内,可单独保存。
+          </div>
+        </div>
+        <a
+          href="/api/user/export"
+          download
+          className="inline-block px-4 py-2 text-sm bg-emerald-600 text-white rounded hover:bg-emerald-700"
+        >
+          下载 JSON
+        </a>
+      </div>
+
       {/* 危险区: 删除账号 */}
       <div className="bg-red-50 border border-red-200 rounded-lg p-5 space-y-3">
         <div>

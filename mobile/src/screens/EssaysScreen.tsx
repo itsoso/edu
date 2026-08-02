@@ -19,10 +19,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import DocumentPicker from 'react-native-document-picker'
 import { api, Essay } from '../lib/api'
+import { API_BASE_URL } from '../lib/config'
 import { signals } from '../lib/signals'
 import { colors } from '../lib/theme'
 import { useResponsive } from '../lib/responsive'
-import { pickImage } from '../lib/imageCompress'
+import { pickImage, pickImagesMulti } from '../lib/imageCompress'
+import { cachedFetch } from '../lib/offlineCache'
 import EssayAnalysisView from '../components/EssayAnalysisView'
 import SplitView from '../components/SplitView'
 import Share from 'react-native-share'
@@ -83,6 +85,11 @@ function EssayDetail(props: DetailProps) {
     onClose,
     isProcessing,
   } = props
+  const photoUrls = essay.file_urls?.length
+    ? essay.file_urls
+    : essay.file_url
+    ? [essay.file_url]
+    : []
 
   return (
     <View style={{ flex: 1, backgroundColor: '#fff' }}>
@@ -224,13 +231,15 @@ function EssayDetail(props: DetailProps) {
           <Text style={styles.errorText}>失败: {essay.error_message.slice(0, 200)}</Text>
         )}
 
-        {!!essay.file_url && essay.source_type === 'photo' && (
+        {essay.source_type === 'photo' && photoUrls.map((url, index) => (
           <Image
-            source={{ uri: essay.file_url }}
+            key={url}
+            source={{ uri: url.startsWith('http') ? url : API_BASE_URL + url }}
+            accessibilityLabel={`作文第 ${index + 1} 页`}
             style={styles.essayImage}
             resizeMode="contain"
           />
-        )}
+        ))}
 
         {!!essay.content && (
           <View style={styles.contentBox}>
@@ -259,6 +268,7 @@ export default function EssaysScreen() {
   const [tab, setTab] = useState<InputTab>('text')
   const [busy, setBusy] = useState('')
   const [filterType, setFilterType] = useState('')
+  const [offlineHint, setOfflineHint] = useState(false)
 
   // 粘贴文本
   const [textTitle, setTextTitle] = useState('')
@@ -275,12 +285,16 @@ export default function EssaysScreen() {
   const reload = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await api.listEssays({
-        essay_type: filterType || undefined,
-        limit: PAGE_SIZE,
-      })
+      const cacheKey = `essays:list:t=${filterType || ''}`
+      const { data: r, fromCache } = await cachedFetch(cacheKey, () =>
+        api.listEssays({
+          essay_type: filterType || undefined,
+          limit: PAGE_SIZE,
+        })
+      )
       setEssays(r.items)
       setTotal(r.total)
+      setOfflineHint(fromCache)
       if (active) {
         const u = r.items.find((e) => e.id === active.id)
         if (u) setActive(u)
@@ -315,11 +329,41 @@ export default function EssaysScreen() {
     return () => clearInterval(timer)
   }, [active, reload])
 
-  async function pickFromLibrary() {
+  async function pickMultiFromLibrary() {
     try {
-      const asset = await pickImage('library', 'essay')
-      if (!asset) return
-      await doUploadPhoto(asset)
+      const assets = await pickImagesMulti('essay', 9)
+      if (assets.length === 0) return
+      if (assets.length === 1) {
+        await doUploadPhoto(assets[0])
+        return
+      }
+      const items = assets
+        .filter((a) => !!a.uri)
+        .map((a, i) => ({
+          uri: a.uri as string,
+          name: a.fileName || `essay-${Date.now()}-${i}.jpg`,
+          mime: a.type || 'image/jpeg',
+        }))
+      setBusy(`上传 ${items.length} 张...`)
+      try {
+        const essay = await api.uploadEssayPhotos(items)
+        signals.track('essay.create', {
+          related_table: 'essays',
+          related_id: essay.id,
+          payload: {
+            source_type: 'photo',
+            word_count: essay.word_count || 0,
+            pages: items.length,
+          },
+        })
+        setActive(essay)
+        Alert.alert('上传成功', `${items.length} 张已上传, 点 "识别文字" 按顺序拼接`)
+        reload()
+      } catch (e: any) {
+        Alert.alert('上传失败', String(e?.message || e))
+      } finally {
+        setBusy('')
+      }
     } catch (e: any) {
       Alert.alert('选择失败', String(e?.message || e))
     }
@@ -541,6 +585,11 @@ export default function EssaysScreen() {
     >
       <Text style={styles.title}>作文管理</Text>
       <Text style={styles.subtitle}>收集 · 分类 · AI 批改</Text>
+      {offlineHint ? (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineText}>📴 网络未连接,显示本账号本地缓存(可能不是最新)</Text>
+        </View>
+      ) : null}
 
       {/* 录入 tabs */}
       <View style={styles.card}>
@@ -564,8 +613,10 @@ export default function EssaysScreen() {
           {tab === 'photo' && (
             <View style={{ alignItems: 'center', gap: 10 }}>
               <Text style={styles.bigEmoji}>📸</Text>
-              <Text style={styles.hintText}>拍一张作文照片, AI 会识别文字</Text>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Text style={styles.hintText}>
+                单张:拍照或选 1 张{'\n'}多张:相册选最多 9 张, AI 按顺序拼接
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
                 <Pressable
                   onPress={pickFromCamera}
                   disabled={!!busy}
@@ -574,11 +625,11 @@ export default function EssaysScreen() {
                   <Text style={styles.primaryBtnText}>拍照</Text>
                 </Pressable>
                 <Pressable
-                  onPress={pickFromLibrary}
+                  onPress={pickMultiFromLibrary}
                   disabled={!!busy}
                   style={[styles.secondaryBtn, !!busy && styles.btnDisabled]}
                 >
-                  <Text style={styles.secondaryBtnText}>从相册选择</Text>
+                  <Text style={styles.secondaryBtnText}>相册多张 (≤9)</Text>
                 </Pressable>
               </View>
             </View>
@@ -1013,6 +1064,16 @@ const styles = StyleSheet.create({
   },
   statusText: { fontSize: 13, color: colors.brand },
   errorText: { fontSize: 12, color: colors.red500, marginBottom: 12 },
+  offlineBanner: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#fcd34d',
+    borderWidth: 1,
+    marginVertical: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  offlineText: { color: '#92400e', fontSize: 12 },
   essayImage: {
     width: '100%',
     height: 200,

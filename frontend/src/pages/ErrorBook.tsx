@@ -7,6 +7,7 @@ import ReflectionPrompt from '../components/ReflectionPrompt'
 import MathText from '../components/MathText'
 import SolutionSteps from '../components/SolutionSteps'
 import PrintPanel, { type PrintPanelOptions } from '../components/PrintPanel'
+import ScanSolveModal from '../components/ScanSolveModal'
 import { buildPrintablePayload, openPrintWindow } from '../print/printable'
 import signals from '../lib/signals'
 
@@ -53,6 +54,7 @@ export default function ErrorBook() {
   const [practiceSummaries, setPracticeSummaries] = useState<PracticeSet[]>([])
   const [printOpen, setPrintOpen] = useState(false)
   const [printing, setPrinting] = useState(false)
+  const [scanOpen, setScanOpen] = useState(false)
 
   async function reload() {
     setLoading(true)
@@ -208,12 +210,18 @@ export default function ErrorBook() {
           <h1 className="text-2xl font-bold">错题本</h1>
           <p className="text-slate-500 mt-1 text-sm">记录 → 归因 → 重做 → 标记掌握</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setPrintOpen(true)}
             className="px-4 py-2 border border-slate-300 rounded hover:bg-slate-50 text-sm"
           >
             🖨️ 打印
+          </button>
+          <button
+            onClick={() => setScanOpen(true)}
+            className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm"
+          >
+            📷 拍照解题
           </button>
           <Link
             to="/scan"
@@ -531,6 +539,12 @@ export default function ErrorBook() {
           busy={printing}
           onClose={() => setPrintOpen(false)}
           onConfirm={handlePrint}
+        />
+      )}
+      {scanOpen && (
+        <ScanSolveModal
+          onClose={() => setScanOpen(false)}
+          onSaved={() => reload()}
         />
       )}
     </div>

@@ -40,6 +40,8 @@ rsync -az --delete \
     --exclude='venv' \
     --exclude='backend/data/*.db' \
     --exclude='backend/data/*.db-journal' \
+    --exclude='backend/data/*.db-wal' \
+    --exclude='backend/data/*.db-shm' \
     --exclude='backend/data/.secret_key' \
     --exclude='backend/data/.env' \
     --exclude='backend/data/uploads/' \
@@ -60,7 +62,7 @@ ok "python deps up to date"
 
 # ---------------------------------------------------------------
 step "3/5 remote: npm install + build"
-$SSH "cd $REMOTE_DIR/frontend && npm install --silent 2>&1 | tail -3 && npm run build 2>&1 | tail -8"
+$SSH "cd $REMOTE_DIR/frontend && npm install --silent && npm run build"
 ok "frontend built"
 
 # ---------------------------------------------------------------
@@ -93,7 +95,8 @@ ok "service active"
 # ---------------------------------------------------------------
 step "5/5 verify"
 health=$($SSH "curl -sf http://127.0.0.1:5060/api/health" || echo "FAIL")
-[[ "$health" == *"ok"* ]] || fail "backend health: $health"
+health_compact=$(tr -d '[:space:]' <<<"$health")
+[[ "$health_compact" == '{"ok":true}' ]] || fail "backend health: $health"
 ok "backend /api/health"
 
 https_code=$(curl -s -o /dev/null -w "%{http_code}" "https://$DOMAIN/")
@@ -101,8 +104,83 @@ https_code=$(curl -s -o /dev/null -w "%{http_code}" "https://$DOMAIN/")
 ok "https frontend 200"
 
 api_health=$(curl -s "https://$DOMAIN/api/health")
-[[ "$api_health" == *"ok"* ]] || fail "https api health: $api_health"
+api_health_compact=$(tr -d '[:space:]' <<<"$api_health")
+[[ "$api_health_compact" == '{"ok":true}' ]] || fail "https api health: $api_health"
 ok "https /api/health"
+
+step "auth smoke: temporary account → token login → authenticated me → delete"
+smoke_suffix="$(date +%s)_$RANDOM"
+smoke_user="release_smoke_$smoke_suffix"
+smoke_password="EduSmoke_${smoke_suffix}_A9"
+smoke_cookie=$(mktemp)
+smoke_token=""
+smoke_created=0
+
+cleanup_smoke() {
+    if [[ "$smoke_created" == "1" ]]; then
+        if [[ -n "$smoke_token" ]]; then
+            cleanup_code=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE \
+                -H "Authorization: Bearer $smoke_token" \
+                -H 'Content-Type: application/json' \
+                --data "{\"password\":\"$smoke_password\"}" \
+                "https://$DOMAIN/api/auth/me" || true)
+        else
+            cleanup_code=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE \
+                -b "$smoke_cookie" \
+                -H 'Content-Type: application/json' \
+                --data "{\"password\":\"$smoke_password\"}" \
+                "https://$DOMAIN/api/auth/me" || true)
+        fi
+        [[ "$cleanup_code" == "200" ]] \
+            || color '1;33' "warning: temporary smoke account cleanup returned $cleanup_code"
+    fi
+    rm -f "$smoke_cookie"
+}
+trap cleanup_smoke EXIT
+
+register_response=$(curl -sS -c "$smoke_cookie" -w $'\n%{http_code}' \
+    -H 'Content-Type: application/json' \
+    --data "{\"role\":\"student\",\"username\":\"$smoke_user\",\"password\":\"$smoke_password\",\"display_name\":\"Release Smoke\"}" \
+    "https://$DOMAIN/api/auth/register")
+register_code=${register_response##*$'\n'}
+register_body=${register_response%$'\n'*}
+[[ "$register_code" == "200" ]] || fail "temporary registration failed ($register_code): $register_body"
+smoke_created=1
+
+login_response=$(curl -sS -w $'\n%{http_code}' \
+    -H 'Content-Type: application/json' \
+    --data "{\"username\":\"$smoke_user\",\"password\":\"$smoke_password\"}" \
+    "https://$DOMAIN/api/auth/token-login")
+login_code=${login_response##*$'\n'}
+login_body=${login_response%$'\n'*}
+[[ "$login_code" == "200" ]] || fail "token login failed ($login_code): $login_body"
+smoke_token=$(sed -nE 's/.*"token":"([^"]+)".*/\1/p' <<<"$login_body")
+[[ -n "$smoke_token" ]] || fail "token login response did not contain a token"
+
+authenticated_me=$(curl -sS -H "Authorization: Bearer $smoke_token" \
+    "https://$DOMAIN/api/auth/me")
+grep -Fq "\"username\":\"$smoke_user\"" <<<"$authenticated_me" \
+    || fail "authenticated /api/auth/me did not return smoke user: $authenticated_me"
+
+delete_response=$(curl -sS -w $'\n%{http_code}' -X DELETE \
+    -H "Authorization: Bearer $smoke_token" \
+    -H 'Content-Type: application/json' \
+    --data "{\"password\":\"$smoke_password\"}" \
+    "https://$DOMAIN/api/auth/me")
+delete_code=${delete_response##*$'\n'}
+delete_body=${delete_response%$'\n'*}
+delete_body_compact=$(tr -d '[:space:]' <<<"$delete_body")
+[[ "$delete_code" == "200" && "$delete_body_compact" == '{"ok":true}' ]] \
+    || fail "temporary account deletion failed ($delete_code): $delete_body"
+post_delete_me=$(curl -sS -H "Authorization: Bearer $smoke_token" \
+    "https://$DOMAIN/api/auth/me")
+post_delete_me_compact=$(tr -d '[:space:]' <<<"$post_delete_me")
+[[ "$post_delete_me_compact" == '{"user":null}' ]] \
+    || fail "temporary smoke account still resolves after deletion: $post_delete_me"
+smoke_created=0
+rm -f "$smoke_cookie"
+trap - EXIT
+ok "token login + authenticated /api/auth/me + cleanup"
 
 echo ""
 color '1;32' "🎉 deploy complete — https://$DOMAIN"

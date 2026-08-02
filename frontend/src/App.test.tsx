@@ -24,6 +24,14 @@ vi.mock('./pages/Trends', () => ({
   default: () => <div>Trends Page</div>,
 }))
 
+vi.mock('./pages/GrowthHome', () => ({
+  default: () => <div>Growth Home Page</div>,
+}))
+
+vi.mock('./pages/MyHome', () => ({
+  default: () => <div>My Home Page</div>,
+}))
+
 vi.mock('./pages/Plan', () => ({
   default: () => <div>Plan Page</div>,
 }))

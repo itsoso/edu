@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import KnowledgeGraph from '../components/KnowledgeMap'
 import {
   api,
   type MyProfileResponse,
@@ -196,6 +197,15 @@ export default function Insights() {
           AI 对你最近学习的观察. 你可以看, 可以改, 可以删.
         </p>
       </header>
+
+      {/* 知识点图谱 */}
+      <section className="bg-white border border-slate-200 rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-bold">🧭 知识点图谱</h2>
+          <span className="text-xs text-slate-400">面积 = 错题数 · 颜色 = 掌握度</span>
+        </div>
+        <KnowledgeGraph />
+      </section>
 
       {welcomeOpen && (
         <div className="bg-brand-50 border border-brand-200 rounded-lg p-5 text-sm text-slate-700 leading-relaxed">

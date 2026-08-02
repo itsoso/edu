@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 跨项目工程规范 (所有项目共享)
+
+优先遵循 `~/work/personal/PRACTICES/` 下的通用实践 + `~/.claude/CLAUDE.md` 全局规则:
+
+- 移动端 / Expo / iOS 开发 → [`mobile-expo-dev-workflow.md`](../PRACTICES/mobile-expo-dev-workflow.md) — 4 通道模型、反馈环、Metro 坑、凭证/Sentry env 配置
+- Expo local native module → [`expo-local-module-podspec.md`](../PRACTICES/expo-local-module-podspec.md)
+- LLM Agent / Orchestrator 设计 → [`~/work/personal/health-llm-driven/docs/HARNESS.md`](../health-llm-driven/docs/HARNESS.md)
+
+项目特有规范写在下面,与上面冲突时项目内的优先。
+
 ## Repository layout
 
 Three deployable surfaces, one backend:

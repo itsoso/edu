@@ -1,3 +1,4 @@
+import katex from 'katex'
 import type { Mistake, PracticeSet } from '../api'
 
 export type PrintableMode = 'questions' | 'answers' | 'combined'
@@ -109,6 +110,27 @@ function escapeHtml(text: string) {
     .replace(/"/g, '&quot;')
 }
 
+/** 渲染含 $...$ 的文本: 数学段交给 KaTeX, 其他段保留换行 (escape).
+ *  打印 PDF 用的纯字符串 → HTML, 不进 React. */
+function renderMathHtml(text: string): string {
+  if (!text) return ''
+  const parts: string[] = []
+  const re = /\$([^$\n]+)\$/g
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(escapeHtml(text.slice(last, m.index)))
+    try {
+      parts.push(katex.renderToString(m[1], { throwOnError: false, displayMode: false }))
+    } catch {
+      parts.push(escapeHtml(`$${m[1]}$`))
+    }
+    last = re.lastIndex
+  }
+  if (last < text.length) parts.push(escapeHtml(text.slice(last)))
+  return parts.join('').replace(/\n/g, '<br/>')
+}
+
 function renderEntry(entry: PrintableEntry, isAnswerSection: boolean) {
   const content = isAnswerSection ? entry.answer : entry.prompt
   return `
@@ -120,7 +142,7 @@ function renderEntry(entry: PrintableEntry, isAnswerSection: boolean) {
         </div>
         <div class="entry-meta">${escapeHtml(entry.meta.filter(Boolean).join(' · '))}</div>
       </div>
-      <pre class="entry-body">${escapeHtml(content)}</pre>
+      <div class="entry-body">${renderMathHtml(content)}</div>
     </article>
   `
 }
@@ -147,6 +169,7 @@ export function buildPrintableDocument(payload: PrintablePayload) {
     <head>
       <meta charset="UTF-8" />
       <title>${escapeHtml(payload.title)}</title>
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />
       <style>
         @page { size: A4; margin: 12mm; }
         body { font-family: "PingFang SC", "Noto Serif SC", serif; color: #0f172a; margin: 0; }
@@ -160,7 +183,8 @@ export function buildPrintableDocument(payload: PrintablePayload) {
         .entry-head { display: flex; justify-content: space-between; gap: 4mm; margin-bottom: 3mm; }
         .entry-label { font-size: 16px; font-weight: 700; }
         .entry-subject, .entry-meta { font-size: 11px; color: #475569; }
-        .entry-body { white-space: pre-wrap; font-family: "PingFang SC", "Noto Serif SC", serif; font-size: 14px; line-height: 1.75; margin: 0; }
+        .entry-body { font-size: 14px; line-height: 1.75; word-break: break-word; }
+        .entry-body .katex { font-size: 1em; }
       </style>
     </head>
     <body>${sectionHtml}</body>

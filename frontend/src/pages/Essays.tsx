@@ -29,6 +29,15 @@ export default function Essays() {
   const [tab, setTab] = useState<InputTab>('text')
   const [busy, setBusy] = useState('')
 
+  // 范文 (按需生成, 不持久化)
+  const [model, setModel] = useState<{
+    title: string
+    content: string
+    highlights: string[]
+    structure_note: string
+  } | null>(null)
+  const [modelBusy, setModelBusy] = useState(false)
+
   // 过滤
   const [filterType, setFilterType] = useState('')
   const [searchQ, setSearchQ] = useState('')
@@ -79,20 +88,36 @@ export default function Essays() {
     { interval: 3000, enabled: !!active && isProcessing }
   )
 
-  // ---- 上传照片 ----
-  async function handlePhoto(file: File) {
-    setBusy('压缩中...')
+  // ---- 上传照片 (支持多张, 最多 9 张) ----
+  async function handlePhotos(rawFiles: File[]) {
+    if (rawFiles.length === 0) return
+    if (rawFiles.length > 9) {
+      toast.error('最多 9 张')
+      return
+    }
+    setBusy(`压缩 ${rawFiles.length} 张...`)
     try {
-      const r = await compressImage(file)
-      setBusy(`上传中 ${formatBytes(r.compressedSize)}...`)
-      const essay = await api.uploadEssayFile(r.file, 'photo')
+      const compressed: File[] = []
+      let totalSize = 0
+      for (let i = 0; i < rawFiles.length; i++) {
+        setBusy(`压缩 ${i + 1}/${rawFiles.length}...`)
+        const r = await compressImage(rawFiles[i])
+        compressed.push(r.file)
+        totalSize += r.compressedSize
+      }
+      setBusy(`上传 ${compressed.length} 张 (${formatBytes(totalSize)})...`)
+      const essay = await api.uploadEssayFile(compressed, 'photo')
       signals.track('essay.create', {
         related_table: 'essays',
         related_id: essay.id,
-        payload: { source_type: 'photo', word_count: essay.word_count || 0 },
+        payload: { source_type: 'photo', word_count: essay.word_count || 0, pages: compressed.length },
       })
       setActive(essay)
-      toast.info('照片已上传, 点"识别文字"提取正文')
+      toast.info(
+        compressed.length > 1
+          ? `${compressed.length} 张已上传, 点"识别文字"按顺序拼接`
+          : '照片已上传, 点"识别文字"提取正文'
+      )
       reload()
     } catch (e: any) {
       toast.error('上传失败: ' + (e.message || e))
@@ -244,7 +269,9 @@ export default function Essays() {
           {tab === 'photo' && (
             <div className="text-center py-4 space-y-3">
               <div className="text-4xl">📸</div>
-              <div className="text-sm text-slate-600">拍一张作文照片, AI 会识别文字</div>
+              <div className="text-sm text-slate-600">
+                可一次选最多 9 张, AI 会按顺序拼接为一篇作文
+              </div>
               <button
                 onClick={() => photoRef.current?.click()}
                 disabled={!!busy}
@@ -256,10 +283,11 @@ export default function Essays() {
                 ref={photoRef}
                 type="file"
                 accept="image/*"
+                multiple
                 className="hidden"
                 onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) handlePhoto(f)
+                  const list = e.target.files ? Array.from(e.target.files) : []
+                  if (list.length) handlePhotos(list)
                   e.target.value = ''
                 }}
               />
@@ -374,7 +402,7 @@ export default function Essays() {
             essays.map((e) => (
               <button
                 key={e.id}
-                onClick={() => { setActive(e); setEditing(false) }}
+                onClick={() => { setActive(e); setEditing(false); setModel(null) }}
                 className={`w-full text-left px-3 py-3 rounded-lg border text-sm hover:bg-slate-50 ${
                   active?.id === e.id ? 'bg-brand-50 border-brand-200' : 'bg-white border-slate-200'
                 }`}
@@ -497,9 +525,18 @@ export default function Essays() {
               </div>
 
               {/* 原图 (photo 来源) */}
-              {active.file_url && active.source_type === 'photo' && (
-                <img src={active.file_url} alt="" className="max-h-48 rounded border border-slate-200 object-contain" />
-              )}
+              {active.source_type === 'photo' && (active.file_urls?.length || active.file_url) ? (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {(active.file_urls?.length ? active.file_urls : [active.file_url!]).map((url, index) => (
+                    <img
+                      key={url}
+                      src={url}
+                      alt={`作文第 ${index + 1} 页`}
+                      className="max-h-48 shrink-0 rounded border border-slate-200 object-contain"
+                    />
+                  ))}
+                </div>
+              ) : null}
 
               {/* 正文 */}
               {active.content && (
@@ -518,6 +555,69 @@ export default function Essays() {
                   <Suspense fallback={<div className="text-sm text-slate-400">加载中...</div>}>
                     <EssayAnalysisView a={active.analysis} />
                   </Suspense>
+                </div>
+              )}
+
+              {/* 同主题范文 (按需生成) */}
+              {active.content && active.status !== 'analyzing' && active.status !== 'ocr_processing' && (
+                <div className="border border-emerald-200 bg-emerald-50/50 rounded p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm font-semibold text-emerald-700">📖 同主题范文参考</div>
+                    {!model ? (
+                      <button
+                        onClick={async () => {
+                          setModelBusy(true)
+                          try {
+                            const r = await api.generateEssayModel(active.id)
+                            setModel(r)
+                          } catch (e: any) {
+                            toast.error('生成范文失败: ' + (e.message || e))
+                          } finally {
+                            setModelBusy(false)
+                          }
+                        }}
+                        disabled={modelBusy}
+                        className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        {modelBusy ? '生成中(约 20 秒)...' : '生成一篇范文'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setModel(null)}
+                        className="text-xs text-slate-500 hover:text-slate-700"
+                      >
+                        收起
+                      </button>
+                    )}
+                  </div>
+                  {!model && !modelBusy && (
+                    <div className="text-xs text-slate-500">
+                      让 AI 写一篇与你这篇作文同主题、同类型的优秀范文,可以学习它的结构和细节描写
+                    </div>
+                  )}
+                  {model && (
+                    <div className="space-y-3 text-sm">
+                      <div className="font-bold text-base text-slate-900">{model.title}</div>
+                      {model.structure_note && (
+                        <div className="text-xs text-slate-500 bg-white rounded px-2 py-1.5 border border-slate-200">
+                          🧱 {model.structure_note}
+                        </div>
+                      )}
+                      <div className="text-slate-800 whitespace-pre-wrap leading-relaxed bg-white rounded p-3 border border-slate-200 max-h-96 overflow-y-auto">
+                        {model.content}
+                      </div>
+                      {model.highlights.length > 0 && (
+                        <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                          <div className="text-xs font-semibold text-amber-900 mb-1">✨ 可学习要点</div>
+                          <ul className="list-disc pl-5 space-y-0.5 text-xs text-amber-900">
+                            {model.highlights.map((h, i) => (
+                              <li key={i}>{h}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

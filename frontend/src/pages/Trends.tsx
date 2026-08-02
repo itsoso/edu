@@ -3,7 +3,7 @@ import { useIsDesktop } from '../hooks/useMediaQuery'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
-import { api, Exam } from '../api'
+import { api, type Exam, type ExamInsightSubject, type LatestExamInsight } from '../api'
 
 const SUBJECTS = [
   { key: '科学', color: '#10b981', full: 150 },
@@ -19,28 +19,42 @@ type AddForm = {
   stage: string
   notes: string
   scores: Record<string, string>
+  scoreRanks: Record<string, string>
 }
 
-const emptyForm: AddForm = {
-  exam_name: '',
-  exam_date: '',
-  stage: '初二下',
-  notes: '',
-  scores: Object.fromEntries(SUBJECTS.map((s) => [s.key, ''])),
+function makeEmptyForm(): AddForm {
+  return {
+    exam_name: '',
+    exam_date: '',
+    stage: '初二下',
+    notes: '',
+    scores: Object.fromEntries(SUBJECTS.map((s) => [s.key, ''])),
+    scoreRanks: Object.fromEntries(SUBJECTS.map((s) => [s.key, ''])),
+  }
 }
 
 export default function Trends() {
   const isDesktop = useIsDesktop()
   const [exams, setExams] = useState<Exam[]>([])
+  const [insight, setInsight] = useState<LatestExamInsight | null>(null)
+  const [insightError, setInsightError] = useState<string | null>(null)
   const [tab, setTab] = useState<'subjects' | 'total' | 'rank'>('subjects')
   const [showAdd, setShowAdd] = useState(false)
-  const [form, setForm] = useState<AddForm>({ ...emptyForm })
+  const [form, setForm] = useState<AddForm>(() => makeEmptyForm())
   const [grade_rank, setGradeRank] = useState('')
   const [examFeeling, setExamFeeling] = useState('')
 
   async function reload() {
     const d = await api.listExams()
     setExams(d)
+    try {
+      const latest = await api.latestExamInsight()
+      setInsight(latest.exists ? latest : null)
+      setInsightError(null)
+    } catch {
+      setInsight(null)
+      setInsightError('考试复盘加载失败')
+    }
   }
   useEffect(() => {
     reload()
@@ -67,9 +81,14 @@ export default function Trends() {
 
   async function submit() {
     const scores: Record<string, number> = {}
+    const score_ranks: Record<string, number> = {}
     Object.entries(form.scores).forEach(([k, v]) => {
       const n = parseFloat(v)
       if (!isNaN(n)) scores[k] = n
+    })
+    Object.entries(form.scoreRanks).forEach(([k, v]) => {
+      const n = parseInt(v, 10)
+      if (!isNaN(n)) score_ranks[k] = n
     })
     const created = await api.createExam({
       exam_name: form.exam_name || '新考试',
@@ -78,6 +97,7 @@ export default function Trends() {
       notes: form.notes || null,
       grade_rank: grade_rank ? parseInt(grade_rank) : null,
       scores,
+      score_ranks,
     })
     // 如果她写了考完感受, 顺便存一条 reflection (永远不喂给 AI)
     if (examFeeling.trim()) {
@@ -91,7 +111,7 @@ export default function Trends() {
         // 存感受失败不影响成绩录入
       }
     }
-    setForm({ ...emptyForm, scores: { ...emptyForm.scores } })
+    setForm(makeEmptyForm())
     setGradeRank('')
     setExamFeeling('')
     setShowAdd(false)
@@ -157,13 +177,30 @@ export default function Trends() {
                 <label className="text-xs text-slate-500">
                   {s.key} (满分 {s.full})
                 </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  className="w-full border border-slate-300 rounded px-3 py-2 text-sm"
-                  value={form.scores[s.key]}
-                  onChange={(e) => setForm({ ...form, scores: { ...form.scores, [s.key]: e.target.value } })}
-                />
+                <div className="grid grid-cols-[minmax(0,1fr)_72px] gap-2">
+                  <input
+                    type="number"
+                    step="0.1"
+                    aria-label={`${s.key}分数`}
+                    placeholder="分数"
+                    className="w-full min-w-0 border border-slate-300 rounded px-3 py-2 text-sm"
+                    value={form.scores[s.key]}
+                    onChange={(e) => setForm({ ...form, scores: { ...form.scores, [s.key]: e.target.value } })}
+                  />
+                  <input
+                    type="number"
+                    aria-label={`${s.key}单科排名`}
+                    placeholder="排名"
+                    className="w-full min-w-0 border border-slate-300 rounded px-2 py-2 text-sm"
+                    value={form.scoreRanks[s.key]}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        scoreRanks: { ...form.scoreRanks, [s.key]: e.target.value },
+                      })
+                    }
+                  />
+                </div>
               </div>
             ))}
           </div>
@@ -193,6 +230,13 @@ export default function Trends() {
           >
             保存
           </button>
+        </div>
+      )}
+
+      {insight && <LatestExamInsightCard insight={insight} />}
+      {insightError && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {insightError}
         </div>
       )}
 
@@ -314,7 +358,12 @@ export default function Trends() {
                 <td className="px-3 py-2 text-center">{e.grade_rank ?? '-'}</td>
                 {SUBJECTS.map((s) => (
                   <td key={s.key} className="px-3 py-2 text-center">
-                    {e.scores[s.key] ?? '-'}
+                    <div className="font-medium text-slate-800">{e.scores[s.key] ?? '-'}</div>
+                    {e.score_ranks?.[s.key] != null && (
+                      <div className="mt-0.5 text-[11px] text-slate-400">
+                        第 {e.score_ranks[s.key]} 名
+                      </div>
+                    )}
                   </td>
                 ))}
                 <td className="px-3 py-2 text-xs text-slate-500">{e.notes}</td>
@@ -333,4 +382,106 @@ export default function Trends() {
       </div>
     </div>
   )
+}
+
+function LatestExamInsightCard({ insight }: { insight: LatestExamInsight }) {
+  const latest = insight.latest_exam
+  const focus = insight.focus_subjects || []
+  const strengths = insight.strengths || []
+  const primary = focus[0]
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+            最新考试复盘
+          </div>
+          <h2 className="mt-2 text-xl font-semibold text-slate-900">
+            {latest?.exam_name || '最新考试'}复盘
+          </h2>
+          {insight.summary && (
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+              {insight.summary}
+            </p>
+          )}
+
+          {primary && (
+            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-base font-semibold text-rose-900">
+                  先修复：{primary.subject}
+                </div>
+                {primary.subject_rank != null && (
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-rose-700 ring-1 ring-rose-200">
+                    单科排名 {primary.subject_rank}
+                  </span>
+                )}
+                {primary.delta_from_previous != null && (
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
+                    较上次 {formatSigned(primary.delta_from_previous)} 分
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 text-sm leading-6 text-rose-900">
+                {primary.recommendation}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          {focus.length > 1 && (
+            <div>
+              <div className="text-xs font-medium text-slate-500">后续修复队列</div>
+              <div className="mt-2 space-y-2">
+                {focus.slice(1, 4).map((item) => (
+                  <InsightSubjectRow key={item.subject} item={item} />
+                ))}
+              </div>
+            </div>
+          )}
+          {strengths.length > 0 && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+              <div className="text-xs font-medium text-emerald-800">保持优势</div>
+              <div className="mt-1 text-sm text-emerald-900">
+                {strengths.map((s) => s.subject).join('、')}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function InsightSubjectRow({ item }: { item: ExamInsightSubject }) {
+  const subjectMeta = SUBJECTS.find((s) => s.key === item.subject)
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span
+            className="h-2.5 w-2.5 rounded-full"
+            style={{ backgroundColor: subjectMeta?.color || '#64748b' }}
+          />
+          <span className="font-medium text-slate-900">{item.subject}</span>
+        </div>
+        <div className="mt-1 truncate text-xs text-slate-500">{item.recommendation}</div>
+      </div>
+      <div className="shrink-0 text-right text-xs text-slate-500">
+        <div>{formatScore(item.latest_score)} / {formatScore(item.full_mark)}</div>
+        {item.subject_rank != null && <div>第 {item.subject_rank} 名</div>}
+      </div>
+    </div>
+  )
+}
+
+function formatScore(v: number | null | undefined) {
+  if (v == null) return '-'
+  return Number.isInteger(v) ? String(v) : v.toFixed(1)
+}
+
+function formatSigned(v: number) {
+  return v > 0 ? `+${formatScore(v)}` : formatScore(v)
 }

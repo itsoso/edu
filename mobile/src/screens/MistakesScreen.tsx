@@ -17,6 +17,7 @@ import { api, Mistake } from '../lib/api'
 import { signals } from '../lib/signals'
 import { colors } from '../lib/theme'
 import { useResponsive } from '../lib/responsive'
+import { cachedFetch } from '../lib/offlineCache'
 import MathText from '../components/MathText'
 import SplitView from '../components/SplitView'
 import ReflectionPrompt from '../components/ReflectionPrompt'
@@ -65,19 +66,27 @@ export default function MistakesScreen() {
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [generatingId, setGeneratingId] = useState<number | null>(null)
+  const [offlineHint, setOfflineHint] = useState(false)
 
   const reload = useCallback(async () => {
     setLoading(true)
     setErr('')
+    setOfflineHint(false)
     try {
-      const pageResult = await api.listMistakesPaged({
-        subject: filterSubject || undefined,
-        mastered: filterStatus === '' ? undefined : (Number(filterStatus) as 0 | 1),
-        limit: PAGE_SIZE,
-        offset: 0,
-      })
+      const cacheKey = `mistakes:list:s=${filterSubject || ''}&m=${filterStatus}`
+      const { data: pageResult, fromCache } = await cachedFetch(
+        cacheKey,
+        () =>
+          api.listMistakesPaged({
+            subject: filterSubject || undefined,
+            mastered: filterStatus === '' ? undefined : (Number(filterStatus) as 0 | 1),
+            limit: PAGE_SIZE,
+            offset: 0,
+          })
+      )
       setMistakes(pageResult.items)
       setTotal(pageResult.total)
+      if (fromCache) setOfflineHint(true)
     } catch (e: any) {
       setErr(e?.message || String(e))
     } finally {
@@ -309,6 +318,13 @@ export default function MistakesScreen() {
       </View>
 
       {err ? <Text style={styles.errorText}>{err}</Text> : null}
+      {offlineHint ? (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineText}>
+            📴 网络未连接,显示本地缓存(可能不是最新)
+          </Text>
+        </View>
+      ) : null}
 
       {loading && mistakes.length === 0 ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.brand} />
@@ -430,6 +446,13 @@ export default function MistakesScreen() {
           <Text style={styles.title}>错题本</Text>
           <Text style={styles.subtitle}>记录 → 归因 → 重做 → 标记掌握</Text>
         </View>
+        <Pressable
+          onPress={() => navigation.navigate('ScanSolve' as never)}
+          style={styles.scanSolveButton}
+          hitSlop={8}
+        >
+          <Text style={styles.scanSolveButtonText}>📷 拍解题</Text>
+        </Pressable>
         <Pressable
           onPress={() => navigation.navigate('Scan' as never)}
           style={styles.scanButton}
@@ -675,6 +698,14 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   scanButtonText: { color: colors.slate700, fontSize: 13, fontWeight: '500' },
+  scanSolveButton: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  scanSolveButtonText: { color: '#fff', fontSize: 13, fontWeight: '600' },
 
   filterWrap: {
     paddingHorizontal: 16,
@@ -713,6 +744,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
+  offlineBanner: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#fcd34d',
+    borderWidth: 1,
+    marginHorizontal: 16,
+    marginVertical: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  offlineText: { color: '#92400e', fontSize: 12 },
 
   card: {
     backgroundColor: '#fff',

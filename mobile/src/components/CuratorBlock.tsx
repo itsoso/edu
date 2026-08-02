@@ -16,6 +16,7 @@ import {
 import { api, CuratedItem } from '../lib/api'
 import { colors } from '../lib/theme'
 import { useResponsive } from '../lib/responsive'
+import MathText from './MathText'
 
 type Props = {
   onNavigate?: (route: string, params?: any) => void
@@ -216,10 +217,12 @@ export default function CuratorBlock({ onNavigate }: Props) {
                       <Text style={styles.itemEmoji}>
                         {KIND_EMOJI[item.kind] || '✨'}
                       </Text>
-                      <Text style={styles.itemTitle}>{item.title}</Text>
+                      <View style={{ flex: 1 }}>
+                        <MathText text={item.title} style={styles.itemTitle} />
+                      </View>
                     </View>
                     {item.description && (
-                      <Text style={styles.itemDesc}>{item.description}</Text>
+                      <MathText text={item.description} style={styles.itemDesc} />
                     )}
                     {rationale && (
                       <Text style={styles.itemRationale}>💭 {rationale}</Text>

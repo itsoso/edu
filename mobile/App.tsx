@@ -23,6 +23,8 @@ import DashboardScreen from './src/screens/DashboardScreen'
 import MistakesScreen from './src/screens/MistakesScreen'
 import EssaysScreen from './src/screens/EssaysScreen'
 import ScanScreen from './src/screens/ScanScreen'
+import ScanSolveScreen from './src/screens/ScanSolveScreen'
+import AssignmentsScreen from './src/screens/AssignmentsScreen'
 import MoreScreen from './src/screens/MoreScreen'
 import PlanScreen from './src/screens/PlanScreen'
 import TrendsScreen from './src/screens/TrendsScreen'
@@ -123,6 +125,16 @@ function Router() {
             name="Scan"
             component={ScanScreen}
             options={{ headerShown: true, title: '扫试卷' }}
+          />
+          <Stack.Screen
+            name="ScanSolve"
+            component={ScanSolveScreen}
+            options={{ headerShown: true, title: '拍照解题' }}
+          />
+          <Stack.Screen
+            name="Assignments"
+            component={AssignmentsScreen}
+            options={{ headerShown: true, title: '任务' }}
           />
           <Stack.Screen
             name="Journal"

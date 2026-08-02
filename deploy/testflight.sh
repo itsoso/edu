@@ -25,6 +25,7 @@
 #   ./deploy/testflight.sh                    # 普通发布
 #   SKIP_UPLOAD=1 ./deploy/testflight.sh      # 只 archive + export, 不上传 (sanity)
 #   ARCHIVE_ONLY=1 ./deploy/testflight.sh     # 只 archive 不 export 不 upload
+#   SKIP_BUILD_BUMP=1 ./deploy/testflight.sh  # 使用已提交的 build 号, 保持源码干净
 
 set -euo pipefail
 
@@ -87,9 +88,14 @@ CURRENT_BUILD=$(grep -m1 -E '^[[:space:]]+CURRENT_PROJECT_VERSION = [0-9]+;' "$P
 [[ -n "$CURRENT_BUILD" ]] || fail "could not parse CURRENT_PROJECT_VERSION"
 NEXT_BUILD=$((CURRENT_BUILD + 1))
 
-# 同时更新所有 CURRENT_PROJECT_VERSION = N; 行
-sed -i '' "s/CURRENT_PROJECT_VERSION = $CURRENT_BUILD;/CURRENT_PROJECT_VERSION = $NEXT_BUILD;/g" "$PBXPROJ"
-ok "build $CURRENT_BUILD → $NEXT_BUILD"
+if [[ -n "${SKIP_BUILD_BUMP:-}" ]]; then
+    NEXT_BUILD=$CURRENT_BUILD
+    ok "using committed build $CURRENT_BUILD (SKIP_BUILD_BUMP)"
+else
+    # 同时更新所有 CURRENT_PROJECT_VERSION = N; 行
+    sed -i '' "s/CURRENT_PROJECT_VERSION = $CURRENT_BUILD;/CURRENT_PROJECT_VERSION = $NEXT_BUILD;/g" "$PBXPROJ"
+    ok "build $CURRENT_BUILD → $NEXT_BUILD"
+fi
 
 MARKETING_VERSION=$(grep -m1 -E '^[[:space:]]+MARKETING_VERSION = [^;]+;' "$PBXPROJ" | sed 's/.*= *//; s/;//' | tr -d '"')
 ok "marketing version: $MARKETING_VERSION (改 .pbxproj MARKETING_VERSION 才会变)"
@@ -109,8 +115,7 @@ xcodebuild \
     -destination "generic/platform=iOS" \
     -archivePath "$ARCHIVE_PATH" \
     -allowProvisioningUpdates \
-    archive \
-    | tail -40
+    archive
 
 [[ -d "$ARCHIVE_PATH" ]] || fail "archive failed"
 ok "archive at $ARCHIVE_PATH"
@@ -128,8 +133,7 @@ xcodebuild \
     -archivePath "$ARCHIVE_PATH" \
     -exportPath "$EXPORT_DIR" \
     -exportOptionsPlist "$EXPORT_OPTIONS" \
-    -allowProvisioningUpdates \
-    | tail -20
+    -allowProvisioningUpdates
 
 IPA_PATH=$(find "$EXPORT_DIR" -name "*.ipa" | head -1)
 [[ -n "$IPA_PATH" && -f "$IPA_PATH" ]] || fail "IPA not generated"
@@ -160,8 +164,7 @@ case "$UPLOAD_MODE" in
             -t ios \
             --apiKey "$EDU_ASC_KEY_ID" \
             --apiIssuer "$EDU_ASC_ISSUER_ID" \
-            --output-format json \
-            | tail -30
+            --output-format json
         ok "altool upload done"
         ;;
 
@@ -172,8 +175,7 @@ case "$UPLOAD_MODE" in
             -t ios \
             --username "$EDU_APPLE_ID" \
             --password "@keychain:edu-tf-altool" \
-            --output-format json \
-            | tail -30
+            --output-format json
         ok "altool upload done (keychain pwd)"
         ;;
 
@@ -183,8 +185,7 @@ case "$UPLOAD_MODE" in
             -t ios \
             --username "$EDU_APPLE_ID" \
             --password "$EDU_APP_PASSWORD" \
-            --output-format json \
-            | tail -30
+            --output-format json
         ok "altool upload done; 把 password 存进 keychain 下次免输:"
         color '0' "  security add-generic-password -s edu-tf-altool -a $EDU_APPLE_ID -w 'YOUR_PASSWORD'"
         ;;
@@ -211,8 +212,7 @@ case "$UPLOAD_MODE" in
             -t ios \
             --username "$EDU_APPLE_ID" \
             --password "$ASP_INPUT" \
-            --output-format json \
-            | tail -30
+            --output-format json
         unset ASP_INPUT
         ok "altool upload done"
         ;;
@@ -228,7 +228,9 @@ case "$UPLOAD_MODE" in
             exit 1
         fi
         open -a Transporter "$IPA_PATH"
-        ok "Transporter 已打开, IPA 已加载. 点窗口里的 Deliver 按钮即可."
+        color '1;33' "Transporter 已打开, IPA 已加载. 点 Deliver 后以回执为准."
+        color '0' "当前状态: 等待人工 Deliver, 尚未上传成功."
+        exit 2
         ;;
 esac
 

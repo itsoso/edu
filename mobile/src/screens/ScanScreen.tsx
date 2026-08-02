@@ -76,10 +76,12 @@ export default function ScanScreen() {
   }, [reload])
 
   // Polling every 3s while active is extracting/analyzing
+  const activeId = active?.id
+  const activeStatus = active?.status
   useEffect(() => {
-    if (!active) return
-    if (active.status !== 'extracting' && active.status !== 'analyzing') return
-    const id = active.id
+    if (!activeId) return
+    if (activeStatus !== 'extracting' && activeStatus !== 'analyzing') return
+    const id = activeId
     const timer = setInterval(async () => {
       try {
         const u = await api.getUpload(id)
@@ -90,7 +92,7 @@ export default function ScanScreen() {
       }
     }, 3000)
     return () => clearInterval(timer)
-  }, [active?.id, active?.status])
+  }, [activeId, activeStatus])
 
   // Auto-select all mistakes when extraction finishes
   useEffect(() => {
@@ -100,7 +102,7 @@ export default function ScanScreen() {
     ) {
       setSelected(new Set(active.extracted.mistakes.map((_, i) => i)))
     }
-  }, [active?.id, active?.status, active?.extracted?.mistakes?.length])
+  }, [active?.id, active?.status, active?.extracted?.mistakes])
 
   async function pickAndUpload(source: 'camera' | 'library') {
     setErr('')

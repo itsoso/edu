@@ -14,6 +14,7 @@ import { useResponsive } from '../lib/responsive'
 type NavProp = NativeStackNavigationProp<Record<string, undefined>>
 
 const ITEMS: { route: string; icon: string; title: string; desc: string }[] = [
+  { route: 'Assignments', icon: '📋', title: '任务', desc: '家长布置 / 学生待办' },
   { route: 'Plan', icon: '📅', title: '周计划', desc: '编辑本周任务 / 跳过 / 替换' },
   { route: 'Schedule', icon: '🗓️', title: '课程日历', desc: '周末接送安排 · 潘立言 / 潘友闻' },
   { route: 'Scan', icon: '📸', title: '扫试卷', desc: '拍照 → OCR → 错题本' },

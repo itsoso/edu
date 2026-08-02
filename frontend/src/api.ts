@@ -65,6 +65,36 @@ export type Exam = {
   notes: string | null
   sort_order: number
   scores: Record<string, number>
+  score_ranks: Record<string, number>
+}
+
+export type ExamInsightExam = {
+  id: number
+  exam_name: string
+  exam_date: string | null
+  stage: string | null
+  total: number | null
+  grade_rank: number | null
+}
+
+export type ExamInsightSubject = {
+  subject: string
+  latest_score: number | null
+  full_mark: number | null
+  score_rate: number | null
+  subject_rank: number | null
+  delta_from_previous: number | null
+  gap_score: number
+  recommendation: string
+}
+
+export type LatestExamInsight = {
+  exists: boolean
+  latest_exam?: ExamInsightExam | null
+  previous_exam?: ExamInsightExam | null
+  summary?: string
+  focus_subjects?: ExamInsightSubject[]
+  strengths?: ExamInsightSubject[]
 }
 
 export type Task = {
@@ -337,6 +367,7 @@ export const api = {
     request<{ id: number }>('/exams', { method: 'POST', body: JSON.stringify(data) }),
   deleteExam: (id: number) =>
     request<{ ok: boolean }>(`/exams/${id}`, { method: 'DELETE' }),
+  latestExamInsight: () => request<LatestExamInsight>('/exams/insights/latest'),
   scoresTrend: () => request<any[]>('/scores/trend'),
 
   // Tasks + checkins
@@ -421,14 +452,7 @@ export const api = {
   createMistake: (data: any) =>
     request<{ id: number }>('/mistakes', { method: 'POST', body: JSON.stringify(data) }),
   scanSolveMistake: async (file: File, saveAsMistake: boolean) => {
-    const fd = new FormData()
-    fd.append('file', file)
-    fd.append('save_as_mistake', saveAsMistake ? '1' : '0')
-    const res = await fetch('/api/mistakes/scan-solve', {
-      method: 'POST', credentials: 'include', body: fd,
-    })
-    if (!res.ok) throw new ApiError(res.status, await res.text())
-    return res.json() as Promise<{
+    type ScanResult = {
       question_text: string
       subject: string
       knowledge_point: string | null
@@ -437,7 +461,29 @@ export const api = {
       solution_steps: string
       common_mistakes: string
       mistake_id?: number
-    }>
+    }
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('save_as_mistake', saveAsMistake ? '1' : '0')
+    const res = await fetch('/api/mistakes/scan-solve', {
+      method: 'POST', credentials: 'include', body: fd,
+    })
+    if (!res.ok) throw new ApiError(res.status, await res.text())
+    const job = await res.json() as { job_id: string; status: 'processing' }
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const state = await request<{
+        status: 'processing' | 'done' | 'failed'
+        result?: ScanResult
+        error?: string
+        detail?: string
+      }>(`/mistakes/scan-solve/${job.job_id}`)
+      if (state.status === 'done' && state.result) return state.result
+      if (state.status === 'failed') {
+        throw new ApiError(502, state.detail || state.error || 'scan_failed')
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+    }
+    throw new ApiError(504, 'scan_solve_timeout')
   },
   updateMistake: (id: number, data: any) =>
     request<{ ok: boolean }>(`/mistakes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -541,13 +587,32 @@ export const api = {
     request<Essay>(`/essays/${id}/ocr`, { method: 'POST' }),
   triggerEssayAnalysis: (id: number) =>
     request<Essay>(`/essays/${id}/analyze`, { method: 'POST' }),
-  generateEssayModel: (id: number) =>
-    request<{
+  generateEssayModel: async (id: number) => {
+    type ModelEssay = {
       title: string
       content: string
       highlights: string[]
       structure_note: string
-    }>(`/essays/${id}/model-essay`, { method: 'POST' }),
+    }
+    const job = await request<{ job_id: string; status: 'processing' }>(
+      `/essays/${id}/model-essay`,
+      { method: 'POST' },
+    )
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const state = await request<{
+        status: 'processing' | 'done' | 'failed'
+        result?: ModelEssay
+        error?: string
+        detail?: string
+      }>(`/essays/model-essay/${job.job_id}`)
+      if (state.status === 'done' && state.result) return state.result
+      if (state.status === 'failed') {
+        throw new ApiError(502, state.detail || state.error || 'gen_failed')
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+    }
+    throw new ApiError(504, 'essay_model_timeout')
+  },
   listEssayTopics: () => request<string[]>('/essays/topics'),
 
   // Assignments (家长布置任务)
@@ -1222,7 +1287,15 @@ export type NextAction = {
   cta_path: string
   subject?: string | null
   knowledge_point?: string | null
+  estimated_minutes?: number | null
+  exam_id?: number | null
   source_mistake_id?: number | null
   practice_set_id?: number | null
   task_id?: number | null
+  reason?: {
+    primary?: string
+    evidence?: string
+    confidence?: string
+    [key: string]: any
+  } | null
 }

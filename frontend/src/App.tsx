@@ -13,6 +13,8 @@ import Register from './pages/Register'
 
 // 其余页面按需加载 (Recharts / ReactMarkdown 等大依赖会被拆到独立 chunk)
 const Trends = lazy(() => import('./pages/Trends'))
+const GrowthHome = lazy(() => import('./pages/GrowthHome'))
+const MyHome = lazy(() => import('./pages/MyHome'))
 const Plan = lazy(() => import('./pages/Plan'))
 const ErrorBook = lazy(() => import('./pages/ErrorBook'))
 const Methods = lazy(() => import('./pages/Methods'))
@@ -33,13 +35,14 @@ const Assignments = lazy(() => import('./pages/Assignments'))
 
 const navItems = [
   { to: '/', label: '今日', icon: '🏠', end: true },
+  { to: '/growth', label: '成长', icon: '📈' },
+  { to: '/me', label: '我的', icon: '🕊️' },
   { to: '/assignments', label: '任务', icon: '📋' },
-  { to: '/journal', label: '我的', icon: '🕊️' },
   { to: '/mistakes', label: '错题本', icon: '📓' },
   { to: '/essays', label: '作文', icon: '📝' },
   { to: '/scan', label: '扫试卷', icon: '📸' },
   { to: '/practice', label: '训练', icon: '🏋️' },
-  { to: '/trends', label: '成长', icon: '📈' },
+  { to: '/trends', label: '成绩趋势', icon: '📈' },
   { to: '/plan', label: '计划', icon: '📅' },
   { to: '/schedule', label: '课程表', icon: '🗓️' },
   { to: '/insights', label: '看见自己', icon: '🪞' },
@@ -51,7 +54,7 @@ const navItems = [
   { to: '/settings', label: '设置', icon: '⚙️' },
 ]
 
-const primaryNavItems = ['/', '/mistakes', '/practice', '/trends', '/journal']
+const primaryNavItems = ['/', '/mistakes', '/practice', '/growth', '/me']
 
 export default function App() {
   const { user, loading } = useAuth()
@@ -250,6 +253,8 @@ function Shell() {
           <Suspense fallback={<PageLoading />}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
+            <Route path="/growth" element={<GrowthHome />} />
+            <Route path="/me" element={<MyHome />} />
             <Route path="/trends" element={<Trends />} />
             <Route path="/plan" element={<Plan />} />
             <Route path="/essays" element={<Essays />} />

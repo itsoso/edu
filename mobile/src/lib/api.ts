@@ -77,17 +77,27 @@ async function request<T>(
     const token = await loadToken()
     if (token) headers['Authorization'] = `Bearer ${token}`
   }
-  const { skipAuth, ...rest } = opts
+  const rest = { ...opts }
+  delete rest.skipAuth
   const res = await fetch(API_BASE_URL + path, { ...rest, headers })
   if (!res.ok) {
-    let msg = ''
+    // RN 的 fetch 不允许 body 被读两次, 先 text() 再尝试解析 JSON.
+    let text = ''
     try {
-      const j = await res.json()
-      msg = j.error || j.message || JSON.stringify(j)
+      text = await res.text()
     } catch {
-      msg = await res.text()
+      /* ignore */
     }
-    throw new ApiError(res.status, msg)
+    let msg = text
+    if (text) {
+      try {
+        const j = JSON.parse(text)
+        msg = j.error || j.message || text
+      } catch {
+        /* not JSON, keep raw text */
+      }
+    }
+    throw new ApiError(res.status, msg || `HTTP ${res.status}`)
   }
   if (res.status === 204) return undefined as any
   const text = await res.text()
@@ -111,14 +121,22 @@ async function requestForm<T>(path: string, form: FormData): Promise<T> {
     body: form as any,
   })
   if (!res.ok) {
-    let msg = ''
+    let text = ''
     try {
-      const j = await res.json()
-      msg = j.error || j.message || JSON.stringify(j)
+      text = await res.text()
     } catch {
-      msg = await res.text()
+      /* ignore */
     }
-    throw new ApiError(res.status, msg)
+    let msg = text
+    if (text) {
+      try {
+        const j = JSON.parse(text)
+        msg = j.error || j.message || text
+      } catch {
+        /* not JSON */
+      }
+    }
+    throw new ApiError(res.status, msg || `HTTP ${res.status}`)
   }
   return res.json()
 }
@@ -307,6 +325,7 @@ export type Essay = {
   file_path: string | null
   file_name: string | null
   file_url: string | null
+  file_urls?: string[]
   essay_type: string | null
   topic: string | null
   word_count: number
@@ -322,6 +341,20 @@ export type Essay = {
   error_message: string | null
   created_at: string
   updated_at: string
+}
+
+export type Assignment = {
+  id: number
+  student_id: number
+  assigner_user_id: number
+  assigner_name?: string | null
+  kind: 'practice' | 'essay' | 'reading' | 'custom'
+  title: string
+  description: string | null
+  due_date: string | null
+  status: 'pending' | 'completed' | 'cancelled'
+  completed_at: string | null
+  created_at: string
 }
 
 export type Mistake = {
@@ -529,6 +562,44 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  scanSolveMistake: async (
+    uri: string,
+    name: string,
+    mime: string,
+    saveAsMistake: boolean
+  ) => {
+    const fd = new FormData()
+    fd.append('file', { uri, name, type: mime } as any)
+    fd.append('save_as_mistake', saveAsMistake ? '1' : '0')
+    const job = await requestForm<{ job_id: string; status: 'processing' }>(
+      '/api/mistakes/scan-solve',
+      fd
+    )
+    type ScanResult = {
+      question_text: string
+      subject: string
+      knowledge_point: string | null
+      difficulty: string
+      answer: string
+      solution_steps: string
+      common_mistakes: string
+      mistake_id?: number
+    }
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const state = await request<{
+        status: 'processing' | 'done' | 'failed'
+        result?: ScanResult
+        error?: string
+        detail?: string
+      }>(`/api/mistakes/scan-solve/${job.job_id}`)
+      if (state.status === 'done' && state.result) return state.result
+      if (state.status === 'failed') {
+        throw new ApiError(502, state.detail || state.error || 'scan_failed')
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+    }
+    throw new ApiError(504, 'scan_solve_timeout')
+  },
   updateMistake: (id: number, data: any) =>
     request<{ ok: boolean }>(`/api/mistakes/${id}`, {
       method: 'PUT',
@@ -639,6 +710,20 @@ export const api = {
     if (opts?.topic) fd.append('topic', opts.topic)
     return requestForm<Essay>('/api/essays', fd)
   },
+  uploadEssayPhotos: async (
+    items: { uri: string; name: string; mime: string }[],
+    opts?: { title?: string; essay_type?: string; topic?: string }
+  ) => {
+    const fd = new FormData()
+    for (const it of items) {
+      fd.append('files', { uri: it.uri, name: it.name, type: it.mime } as any)
+    }
+    fd.append('source_type', 'photo')
+    if (opts?.title) fd.append('title', opts.title)
+    if (opts?.essay_type) fd.append('essay_type', opts.essay_type)
+    if (opts?.topic) fd.append('topic', opts.topic)
+    return requestForm<Essay>('/api/essays', fd)
+  },
   updateEssay: (
     id: number,
     data: Partial<Pick<Essay, 'title' | 'essay_type' | 'topic' | 'content'>>
@@ -654,6 +739,40 @@ export const api = {
   triggerEssayAnalysis: (id: number) =>
     request<Essay>(`/api/essays/${id}/analyze`, { method: 'POST' }),
   listEssayTopics: () => request<string[]>('/api/essays/topics'),
+
+  // Assignments (家长布置任务)
+  listAssignments: (params: { status?: string; mine_assigned?: boolean } = {}) => {
+    const q = toQs({
+      status: params.status,
+      mine_assigned: params.mine_assigned || undefined,
+    })
+    return request<Assignment[]>(`/api/assignments${q}`)
+  },
+  createAssignment: (data: {
+    title: string
+    description?: string
+    kind?: string
+    due_date?: string
+  }) =>
+    request<Assignment>('/api/assignments', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateAssignment: (
+    id: number,
+    data: Partial<{
+      status: 'pending' | 'completed' | 'cancelled'
+      title: string
+      description: string | null
+      due_date: string | null
+    }>
+  ) =>
+    request<Assignment>(`/api/assignments/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteAssignment: (id: number) =>
+    request<{ ok: boolean }>(`/api/assignments/${id}`, { method: 'DELETE' }),
 
   // Reflections
   listReflections: (

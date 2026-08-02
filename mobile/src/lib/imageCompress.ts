@@ -65,6 +65,26 @@ export async function pickImage(
 }
 
 /**
+ * 多图选择 (仅图库). 返回最多 max 张资源, 用户可在系统选图器里按顺序勾选.
+ * 注意: iOS / Android 的 selectionLimit 对应原生 PHPickerViewController / Android 13+ photo picker.
+ */
+export async function pickImagesMulti(
+  scene: CompressScene,
+  max: number
+): Promise<Asset[]> {
+  const tier = TIERS[scene][0]
+  const res = await launchImageLibrary({
+    ...pickerOpts(tier),
+    selectionLimit: max,
+  } as any)
+  if (res.didCancel) return []
+  if (res.errorCode) {
+    throw new Error(res.errorMessage || res.errorCode)
+  }
+  return (res.assets || []).slice(0, max)
+}
+
+/**
  * 判断错误是否值得降级重试.
  *   - 400 "Invalid image_url" — LLM 网关拒收大图
  *   - 413 Payload Too Large — nginx 拒收

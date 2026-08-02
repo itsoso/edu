@@ -112,6 +112,21 @@ export default function Reports() {
     }
   }
 
+  function exportPdf() {
+    if (!report.content_md) return
+    const html = buildReportPrintHtml(active, report.content_md, report.metrics)
+    const win = window.open('', '_blank', 'noopener,noreferrer')
+    if (!win) {
+      alert('浏览器拦截了打印窗口,请允许弹窗后重试')
+      return
+    }
+    win.document.open()
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    setTimeout(() => win.print(), 300)
+  }
+
   // 最近 6 个月的快捷切换
   const recentMonths = useMemo(() => {
     const arr: string[] = []
@@ -207,6 +222,12 @@ export default function Reports() {
         <div className="space-y-4">
           <div className="flex justify-end gap-2">
             <button
+              onClick={() => exportPdf()}
+              className="px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-slate-50"
+            >
+              🖨️ 导出 PDF
+            </button>
+            <button
               onClick={() => generate(true)}
               className="px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-slate-50"
             >
@@ -251,4 +272,92 @@ function MetricsBar({ metrics }: { metrics: any }) {
       ))}
     </div>
   )
+}
+
+/** 把月度报告的 markdown + metrics 渲染为可打印的 A4 HTML.
+ *  极简 markdown 解析 (够用就行: # ## ### / 段落 / **bold** / 列表). */
+function buildReportPrintHtml(month: string, md: string, metrics: any): string {
+  const escape = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const inline = (s: string) =>
+    escape(s)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+
+  const lines = md.split('\n')
+  const out: string[] = []
+  let inList = false
+  for (const raw of lines) {
+    const line = raw.trimEnd()
+    if (line.startsWith('### ')) {
+      if (inList) { out.push('</ul>'); inList = false }
+      out.push(`<h3>${inline(line.slice(4))}</h3>`)
+    } else if (line.startsWith('## ')) {
+      if (inList) { out.push('</ul>'); inList = false }
+      out.push(`<h2>${inline(line.slice(3))}</h2>`)
+    } else if (line.startsWith('# ')) {
+      if (inList) { out.push('</ul>'); inList = false }
+      out.push(`<h1>${inline(line.slice(2))}</h1>`)
+    } else if (/^\s*[-*]\s+/.test(line)) {
+      if (!inList) { out.push('<ul>'); inList = true }
+      out.push(`<li>${inline(line.replace(/^\s*[-*]\s+/, ''))}</li>`)
+    } else if (line.trim() === '') {
+      if (inList) { out.push('</ul>'); inList = false }
+      out.push('<div class="gap"></div>')
+    } else {
+      if (inList) { out.push('</ul>'); inList = false }
+      out.push(`<p>${inline(line)}</p>`)
+    }
+  }
+  if (inList) out.push('</ul>')
+
+  const metricsHtml = metrics
+    ? `<section class="metrics">
+        ${Object.entries(metrics)
+          .map(([k, v]) => {
+            if (v == null || typeof v === 'object') return ''
+            return `<div class="metric"><div class="ml">${escape(String(k))}</div><div class="mv">${escape(String(v))}</div></div>`
+          })
+          .join('')}
+      </section>`
+    : ''
+
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>月度复盘 ${escape(month)}</title>
+  <style>
+    @page { size: A4; margin: 14mm; }
+    body { font-family: "PingFang SC", "Noto Serif SC", serif; color: #0f172a; margin: 0; line-height: 1.6; }
+    .header { border-bottom: 2px solid #94a3b8; padding-bottom: 8mm; margin-bottom: 8mm; }
+    .header h1 { margin: 0; font-size: 22px; }
+    .header .sub { color: #64748b; font-size: 13px; margin-top: 2mm; }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; margin-bottom: 6mm; }
+    .metric { background: #f1f5f9; border-radius: 6px; padding: 4mm; }
+    .metric .ml { color: #64748b; font-size: 11px; }
+    .metric .mv { font-size: 18px; font-weight: 700; margin-top: 1mm; }
+    h1 { font-size: 18px; margin: 5mm 0 3mm; }
+    h2 { font-size: 16px; margin: 4mm 0 2mm; color: #334155; }
+    h3 { font-size: 14px; margin: 3mm 0 2mm; color: #475569; }
+    p { margin: 0 0 2mm; font-size: 13px; }
+    ul { margin: 0 0 2mm 5mm; padding: 0; font-size: 13px; }
+    li { margin-bottom: 1mm; }
+    code { background: #f1f5f9; padding: 0 4px; border-radius: 3px; font-size: 12px; }
+    .gap { height: 2mm; }
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📅 ${escape(month)} 月度复盘</h1>
+    <div class="sub">导出时间: ${new Date().toLocaleString('zh-CN')}</div>
+  </div>
+  ${metricsHtml}
+  ${out.join('\n')}
+</body>
+</html>`
 }

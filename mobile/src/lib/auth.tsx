@@ -5,7 +5,8 @@
  * 家长账号会拿到 bound_student (挂靠的孩子), 学生为 null.
  */
 import React, { createContext, useContext, useEffect, useState } from 'react'
-import { api, loadToken, User, BoundStudent } from './api'
+import { api, clearToken, loadToken, User, BoundStudent } from './api'
+import { clearCache, setCacheOwner } from './offlineCache'
 
 type AuthState = {
   user: User | null
@@ -35,14 +36,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const token = await loadToken()
       if (!token) {
-        setLoading(false)
+        setCacheOwner(null)
         return
       }
       const r = await api.me()
       setUser(r.user)
       setBoundStudent(r.bound_student || null)
-    } catch {
-      /* token invalid */
+      setCacheOwner(r.user?.id ?? null)
+    } catch (error) {
+      await clearToken()
+      setUser(null)
+      setBoundStudent(null)
+      setCacheOwner(null)
+      console.warn('Stored login is no longer valid', error)
     } finally {
       setLoading(false)
     }
@@ -53,35 +59,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const refresh = async () => {
-    try {
-      const r = await api.me()
-      setUser(r.user)
-      setBoundStudent(r.bound_student || null)
-    } catch {
-      /* ignore */
-    }
+    const r = await api.me()
+    setUser(r.user)
+    setBoundStudent(r.bound_student || null)
+    setCacheOwner(r.user?.id ?? null)
   }
 
   const login = async (username: string, password: string) => {
+    await clearCache()
+    setCacheOwner(null)
     const r = await api.tokenLogin(username, password)
+    const m = await api.me()
     setUser(r.user)
-    // me() 返回更丰富的数据 (bound_student)
-    try {
-      const m = await api.me()
-      setBoundStudent(m.bound_student || null)
-    } catch {}
+    setBoundStudent(m.bound_student || null)
+    setCacheOwner(r.user.id)
   }
 
   const register = async (data: any) => {
+    await clearCache()
+    setCacheOwner(null)
     const r = await api.tokenRegister(data)
+    const m = await api.me()
     setUser(r.user)
-    try {
-      const m = await api.me()
-      setBoundStudent(m.bound_student || null)
-    } catch {}
+    setBoundStudent(m.bound_student || null)
+    setCacheOwner(r.user.id)
   }
 
   const logout = async () => {
+    await clearCache()
+    setCacheOwner(null)
     await api.logout()
     setUser(null)
     setBoundStudent(null)

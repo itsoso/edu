@@ -15,7 +15,12 @@ import { useAuth } from '../lib/auth'
 import { colors } from '../lib/theme'
 import { useResponsive } from '../lib/responsive'
 
-const STAGES = ['初一上', '初一下', '初二上', '初二下', '初三上', '初三下']
+const STAGES = [
+  '幼儿园小班', '幼儿园中班', '幼儿园大班',
+  '一年级上', '一年级下', '二年级上', '二年级下', '三年级上', '三年级下',
+  '四年级上', '四年级下', '五年级上', '五年级下', '六年级上', '六年级下',
+  '初一上', '初一下', '初二上', '初二下', '初三上', '初三下',
+]
 
 export default function RegisterScreen({ navigation }: any) {
   const { register } = useAuth()

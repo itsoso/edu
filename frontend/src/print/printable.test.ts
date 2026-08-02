@@ -32,6 +32,7 @@ const practiceSets: PracticeSet[] = [
     knowledge_point: '一元一次方程',
     status: 'done',
     error_message: null,
+    tags: [],
     created_at: '2026-04-13T10:00:00',
     items: [
       {

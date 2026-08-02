@@ -159,7 +159,7 @@ function renderSegments(
     if (!seg.isMath) return seg.text
     // isRawLatex: $...$ 里已经是 LaTeX, 直接给 KaTeX, 不经过 toLatex()
     // 否则 (信号扩展法匹配的伪数学): 需要 toLatex() 转换
-    const latex = seg.isRawLatex ? seg.text : toLatex(seg.text)
+    const latex = seg.isRawLatex ? fixCommonLatex(seg.text) : toLatex(seg.text)
     try {
       const html = katex.renderToString(latex, {
         throwOnError: false,
@@ -171,6 +171,17 @@ function renderSegments(
       return seg.isRawLatex ? `$${seg.text}$` : seg.text
     }
   })
+}
+
+/** 修复 LLM 生成 LaTeX 时常见错误:
+ *  - 缺反斜杠: sqrt{x} → \sqrt{x}, frac{a}{b} → \frac{a}{b}
+ *  - 不闭合: \frac{1sqrt{2}+1} → \frac{1}{\sqrt{2}+1}  (启发式)
+ */
+function fixCommonLatex(s: string): string {
+  let out = s
+  // 给独立的 sqrt{...} / frac{...} / cdot 等加上反斜杠
+  out = out.replace(/(^|[^\\a-zA-Z])(sqrt|frac|cdot|times|div|leq|geq|neq|pm|approx|infty|alpha|beta|theta|pi|sum|int|left|right)\b/g, '$1\\$2')
+  return out
 }
 
 export default function MathText({ text, className }: Props) {

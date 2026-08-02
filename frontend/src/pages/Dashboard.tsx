@@ -89,10 +89,13 @@ export default function Dashboard() {
           ? 'mistakes'
           : nextAction.kind === 'practice'
           ? 'practice_sets'
+          : nextAction.kind === 'exam_gap'
+          ? 'exams'
           : nextAction.kind === 'task'
           ? 'tasks'
           : undefined,
       related_id:
+        nextAction.exam_id ||
         nextAction.source_mistake_id ||
         nextAction.practice_set_id ||
         nextAction.task_id ||
@@ -244,10 +247,13 @@ export default function Dashboard() {
                   ? 'mistakes'
                   : nextAction.kind === 'practice'
                   ? 'practice_sets'
+                  : nextAction.kind === 'exam_gap'
+                  ? 'exams'
                   : nextAction.kind === 'task'
                   ? 'tasks'
                   : undefined,
               related_id:
+                nextAction.exam_id ||
                 nextAction.source_mistake_id ||
                 nextAction.practice_set_id ||
                 nextAction.task_id ||
@@ -461,6 +467,8 @@ function NextActionCard({
       ? '先补漏洞'
       : action.kind === 'practice'
       ? '先巩固'
+      : action.kind === 'exam_gap'
+      ? '考试修复'
       : '然后完成任务'
 
   return (
@@ -477,6 +485,9 @@ function NextActionCard({
             </span>
           </div>
           <p className="mt-2 text-sm leading-6 text-slate-600">{action.description}</p>
+          {action.reason?.evidence && (
+            <p className="mt-1 text-xs leading-5 text-slate-500">{action.reason.evidence}</p>
+          )}
         </div>
         <Link
           to={action.cta_path}
