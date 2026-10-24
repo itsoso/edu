@@ -1,0 +1,283 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Edu Query",
+    "version": "1.0.0",
+    "description": "仅描述现有 GET 查询接口。先检查 Health provider，再通过安全的 Edu 会话读取。不是独立只读 token 或 OAuth 授权服务。"
+  },
+  "servers": [
+    {
+      "url": "https://edu.executor.life"
+    }
+  ],
+  "security": [
+    {
+      "eduBearer": []
+    },
+    {
+      "eduSession": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "eduBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Edu 登录流程返回的 token，不是 Health JWT"
+      },
+      "eduSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "session",
+        "description": "Edu 官方登录会话；浏览器跨域限制仍适用"
+      }
+    }
+  },
+  "paths": {
+    "/api/auth/provider": {
+      "get": {
+        "operationId": "getEduAuthProvider",
+        "summary": "查询运行中的登录提供方；本 Skill 仅在 health 模式下读取私人记录",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "认证提供方",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "provider"
+                  ],
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "local",
+                        "health"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/schedule/children": {
+      "get": {
+        "operationId": "listEduChildren",
+        "summary": "列出当前家庭课表中的孩子",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "当前授权 owner 的记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "count": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "需要 Edu 授权"
+          },
+          "403": {
+            "description": "禁止访问"
+          }
+        }
+      }
+    },
+    "/api/schedule/courses": {
+      "get": {
+        "operationId": "listEduCourses",
+        "summary": "查询课表及上下课时间",
+        "parameters": [
+          {
+            "name": "child",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "on_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "weekend",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1",
+                "true",
+                "yes"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前授权 owner 的记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "需要 Edu 授权"
+          },
+          "403": {
+            "description": "禁止访问"
+          }
+        }
+      }
+    },
+    "/api/exams": {
+      "get": {
+        "operationId": "listEduExams",
+        "summary": "当前 owner 的考试成绩；不支持 child 过滤",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前授权 owner 的记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Total-Count": {
+                "description": "分页前总条数",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "需要 Edu 授权"
+          },
+          "403": {
+            "description": "禁止访问"
+          }
+        }
+      }
+    },
+    "/api/scores/trend": {
+      "get": {
+        "operationId": "getEduScoreTrend",
+        "summary": "当前 owner 的成绩趋势",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前授权 owner 的记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Total-Count": {
+                "description": "分页前总条数",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "需要 Edu 授权"
+          },
+          "403": {
+            "description": "禁止访问"
+          }
+        }
+      }
+    }
+  }
+}

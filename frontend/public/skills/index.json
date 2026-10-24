@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "version": "1.0.0",
+  "title": "Edu Skills",
+  "description": "可下载导入的 Skill 目录；并非 MCP 或推送订阅协议",
+  "skills": [
+    {
+      "name": "edu-query",
+      "version": "1.0.0",
+      "description": "当前授权家庭的课表、上下课时间与 owner 成绩查询",
+      "skill_url": "https://edu.executor.life/skills/edu-query/SKILL.md",
+      "openapi_url": "https://edu.executor.life/skills/edu-query/references/openapi.json",
+      "required_auth_provider": "health",
+      "methods": [
+        "GET"
+      ],
+      "server_push": false
+    }
+  ]
+}
