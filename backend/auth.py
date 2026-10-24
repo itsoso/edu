@@ -119,6 +119,12 @@ def _extract_bearer_token() -> str | None:
 
 def get_current_user_id() -> int | None:
     """优先 bearer token (移动端), 其次 session cookie (web)."""
+    import health_sso
+    if health_sso.enabled():
+        token = _extract_bearer_token()
+        if token:
+            return verify_health_token(token)
+        return health_sso.session_user(session)
     token = _extract_bearer_token()
     if token:
         uid = verify_token(token)
@@ -186,3 +192,22 @@ def student_only(fn):
             return jsonify({"error": "student_only"}), 403
         return fn(*args, **kwargs)
     return wrapper
+
+
+def issue_health_token(cfg):
+    return _get_serializer().dumps({'uid':cfg['user_id'], 'provider':'health',
+        'health_subject':cfg['subject'], 'health_issuer':cfg['issuer']})
+
+
+def verify_health_token(token):
+    import health_sso
+    try:
+        cfg = health_sso.config()
+        data = _get_serializer().loads(token, max_age=8 * 3600)
+        if (isinstance(data, dict) and type(data.get('uid')) is int
+                and data.get('uid') == cfg['user_id'] and data.get('provider') == 'health'
+                and data.get('health_subject') == cfg['subject'] and data.get('health_issuer') == cfg['issuer']):
+            return cfg['user_id']
+    except (BadSignature, SignatureExpired, ValueError):
+        return None
+    return None

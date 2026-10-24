@@ -11,7 +11,7 @@ App 工厂, 负责:
 import logging
 import os
 
-from flask import Flask
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 # 生产环境 gunicorn 把 stdout/stderr 捕获到 /var/log/edu/backend.{log,err}
@@ -27,6 +27,7 @@ from constants import MAX_UPLOAD_BYTES
 from cleanup import start_cleanup_daemon
 
 from routes.auth_routes import bp as auth_bp
+from routes.health_sso import bp as health_sso_bp
 from routes.exams import bp as exams_bp
 from routes.tasks import bp as tasks_bp
 from routes.mistakes import bp as mistakes_bp
@@ -64,7 +65,12 @@ def create_app() -> Flask:
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_HTTPONLY"] = True
 
-    if os.environ.get("EDU_ENV") == "prod":
+    import health_sso
+    if health_sso.enabled():
+        app.config["SESSION_COOKIE_SECURE"] = True
+        app.config["PREFERRED_URL_SCHEME"] = "https"
+        # SSO browser traffic is same-origin; native clients do not require CORS.
+    elif os.environ.get("EDU_ENV") == "prod":
         app.config["SESSION_COOKIE_SECURE"] = True
         app.config["PREFERRED_URL_SCHEME"] = "https"
         # 生产环境由 nginx 统一域名, 同源无需 CORS 白名单
@@ -76,8 +82,30 @@ def create_app() -> Flask:
             origins=["http://127.0.0.1:5173", "http://localhost:5173"],
         )
 
+    @app.before_request
+    def require_health_write_origin():
+        if not health_sso.enabled() or request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+            return None
+        # Callback has its own Health-origin + signed flow proof. Legacy credential
+        # endpoints only return 409 and never perform their old action in SSO mode.
+        if request.endpoint in {'health_sso.callback', 'auth.login', 'auth.token_login',
+                                'auth.register', 'auth.token_register', 'auth.delete_me'}:
+            return None
+        # A verified native Health token is explicit authorization, not ambient cookies.
+        from auth import _extract_bearer_token, verify_health_token
+        token = _extract_bearer_token()
+        if token and verify_health_token(token) is not None:
+            return None
+        try:
+            origin = health_sso.config()['origin']
+        except ValueError:
+            return jsonify(error='health_sso_not_configured'), 503
+        if request.headers.get('Origin') != origin:
+            return jsonify(error='invalid_request_origin'), 403
+        return None
+
     # 注册 blueprints
-    for bp in (auth_bp, exams_bp, tasks_bp, mistakes_bp,
+    for bp in (auth_bp, health_sso_bp, exams_bp, tasks_bp, mistakes_bp,
                uploads_bp, practice_bp, reports_bp, content_bp,
                admin_stats_bp, reflections_bp, goals_bp, journal_media_bp,
                essays_bp, signals_bp, profile_bp, agent_bp, feynman_bp,

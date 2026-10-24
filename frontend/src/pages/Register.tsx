@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
+import { HealthLogin, useLoginProvider } from '../healthAuth'
 
 const STAGES = [
   '幼儿园小班', '幼儿园中班', '幼儿园大班',
@@ -13,6 +14,7 @@ const STAGES = [
 export default function Register() {
   const { register } = useAuth()
   const nav = useNavigate()
+  const authProvider = useLoginProvider()
   const [role, setRole] = useState<'student' | 'parent'>('student')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -50,6 +52,10 @@ export default function Register() {
       setLoading(false)
     }
   }
+
+  if (authProvider.error) return <HealthLogin error={authProvider.error} />
+  if (!authProvider.provider) return <p role="status" className="p-8 text-center">正在获取登录方式…</p>
+  if (authProvider.provider === 'health') return <HealthLogin />
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-brand-50 to-slate-100">

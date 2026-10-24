@@ -6,6 +6,13 @@ from contextlib import contextmanager
 DB_PATH = Path(__file__).parent / "data" / "edu.db"
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS health_sso_pending (
+    state_hash TEXT PRIMARY KEY,
+    browser_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS health_sso_pending_expiry ON health_sso_pending(expires_at);
+
 -- 用户表: 学生 和 家长
 CREATE TABLE IF NOT EXISTS users (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,

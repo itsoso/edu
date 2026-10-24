@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
+import { HealthLogin, useLoginProvider } from '../healthAuth'
 
 export default function Login() {
   const { login } = useAuth()
   const nav = useNavigate()
+  const authProvider = useLoginProvider()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
@@ -25,6 +27,10 @@ export default function Login() {
       setLoading(false)
     }
   }
+
+  if (authProvider.error) return <HealthLogin error={authProvider.error} />
+  if (!authProvider.provider) return <p role="status" className="p-8 text-center">正在获取登录方式…</p>
+  if (authProvider.provider === 'health') return <HealthLogin />
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-brand-50 to-slate-100">

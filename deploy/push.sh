@@ -108,6 +108,22 @@ api_health_compact=$(tr -d '[:space:]' <<<"$api_health")
 [[ "$api_health_compact" == '{"ok":true}' ]] || fail "https api health: $api_health"
 ok "https /api/health"
 
+provider=$(curl -fsS "https://$DOMAIN/api/auth/provider" | python3 -c 'import json,sys; print(json.load(sys.stdin)["provider"])')
+if [[ "$provider" == "health" ]]; then
+    step "auth smoke: Health redirect + legacy password denial"
+    legacy_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+        -H 'Content-Type: application/json' --data '{}' "https://$DOMAIN/api/auth/login")
+    [[ "$legacy_code" == "409" ]] || fail "legacy password endpoint unexpectedly enabled"
+    start_code=$(curl -sS -o /dev/null -w '%{http_code}' "https://$DOMAIN/api/auth/health/start")
+    [[ "$start_code" == "302" ]] || fail "Health login start unavailable ($start_code)"
+    native_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+        -H 'Content-Type: application/json' --data '{}' "https://$DOMAIN/api/auth/token-login")
+    [[ "$native_code" == "400" ]] || fail "native Health login validation failed ($native_code)"
+    ok "Health auth boundary smoke passed; real browser/native owner login still requires acceptance"
+    exit 0
+fi
+[[ "$provider" == "local" ]] || fail "unknown login provider"
+
 step "auth smoke: temporary account → token login → authenticated me → delete"
 smoke_suffix="$(date +%s)_$RANDOM"
 smoke_user="release_smoke_$smoke_suffix"

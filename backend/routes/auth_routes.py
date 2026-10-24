@@ -10,6 +10,17 @@ from plan_template import install_plan_for_student
 
 bp = Blueprint("auth", __name__)
 
+@bp.before_request
+def enforce_health_authentication():
+    import health_sso
+    if health_sso.enabled() and request.endpoint in {
+        'auth.login', 'auth.register', 'auth.token_register', 'auth.delete_me',
+    }:
+        response = jsonify(error='health_login_required', login_url='/api/auth/health/start')
+        response.headers['Cache-Control'] = 'no-store'
+        return response, 409
+
+
 
 @bp.get("/api/health")
 def health():
@@ -77,6 +88,23 @@ def token_login():
     Token 有效期 30 天, 客户端应存在 expo-secure-store.
     """
     data = request.get_json(force=True) or {}
+    import health_sso
+    if health_sso.enabled():
+        if not isinstance(data, dict):
+            return jsonify(error='invalid_credentials'), 400
+        try:
+            cfg = health_sso.native_identity(data.get('username'), data.get('password'))
+        except health_sso.NativeLoginError as error:
+            return jsonify(error=error.code), error.status
+        with db() as conn:
+            from db import row_to_dict
+            user = row_to_dict(conn.execute('SELECT * FROM users WHERE id=?', (cfg['user_id'],)).fetchone())
+        if not user:
+            return jsonify(error='health_account_not_linked'), 403
+        from auth import issue_health_token
+        response = jsonify(user=public_user(user), token=issue_health_token(cfg))
+        response.headers['Cache-Control'] = 'no-store'
+        return response
     username = (data.get("username") or "").strip().lower()
     password = data.get("password") or ""
     with db() as conn:
