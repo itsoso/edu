@@ -151,3 +151,18 @@ def test_embedded_remote_operator_compiles_without_running_cli():
     raw=Path(m.__file__).read_bytes().rsplit(b"\nif __name__ == '__main__':",1)[0]
     compile(raw, '<remote-operator>', 'exec')
     assert b'def execute(payload)' in raw
+
+
+def test_ssh_pins_existing_known_hosts_and_never_accepts_new(monkeypatch,tmp_path):
+    monkeypatch.setattr(m.Path,'home',lambda:tmp_path)
+    with pytest.raises(FileNotFoundError):m.ssh_command('true')
+    ssh=tmp_path/'.ssh';ssh.mkdir();known=ssh/'known_hosts';known.write_text('trusted host entry')
+    known.chmod(0o600)
+    command=m.ssh_command('true')
+    assert 'StrictHostKeyChecking=yes' in command
+    assert 'UserKnownHostsFile='+str(known) in command
+    assert command[-3:]==['22222','root@47.237.191.17','true']
+    known.chmod(0o666)
+    with pytest.raises(m.ActivationError):m.ssh_command('true')
+    known.unlink();known.symlink_to(tmp_path/'other')
+    with pytest.raises(m.ActivationError):m.ssh_command('true')

@@ -325,6 +325,15 @@ def execute(payload):
             raise
 
 
+def ssh_command(command):
+    known_hosts = Path.home() / '.ssh/known_hosts'
+    info = known_hosts.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0,os.getuid()) or info.st_mode & 0o022:
+        raise ActivationError('trusted known-hosts file unavailable')
+    return ['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
+            '-o','UserKnownHostsFile='+str(known_hosts),'-p','22222','root@47.237.191.17',command]
+
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--revision',required=True)
@@ -349,7 +358,7 @@ def main():
     script=Path(__file__).read_bytes().rsplit(b"\nif __name__ == '__main__':",1)[0]
     script+=b"\ntry:\n print(json.dumps(execute(json.load(sys.stdin))))\nexcept BaseException as error:\n print(json.dumps({'state':'FAILED','error_type':type(error).__name__,'reason':str(error) if isinstance(error,ActivationError) else 'operator failure'}),file=sys.stderr)\n sys.exit(1)\n"
     command="python3 -c 'import base64;exec(base64.b64decode(\""+base64.b64encode(script).decode()+"\"))'"
-    result=subprocess.run(['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-p','22222','root@47.237.191.17',command], input=json.dumps(payload).encode(),timeout=120)
+    result=subprocess.run(ssh_command(command), input=json.dumps(payload).encode(),timeout=120)
     if result.returncode:
         raise ActivationError('remote activation failed; retain original binding and inspect journal')
 
