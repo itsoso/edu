@@ -104,6 +104,12 @@ describe('App shell', () => {
     })
   })
 
+  it('opens the exploration module through its protected route', async () => {
+    render(<MemoryRouter initialEntries={['/explore']}><App /></MemoryRouter>)
+    expect(await screen.findByRole('heading', { name: /把课本上的知识/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /探索实验室/ })).toHaveAttribute('href', '/explore')
+  })
+
   it('shows a compact touch navigation on narrow viewports', async () => {
     setViewport(700)
 

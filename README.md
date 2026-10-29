@@ -650,3 +650,9 @@ ssh -p YOUR_SSH_PORT root@YOUR_SERVER_IP "certbot renew && nginx -s reload"
 - 线上: https://YOUR_DOMAIN
 - 技术栈参考: `YOUR_DOMAIN` (llms-board)
 - AI 网关: `https://api.openai.com/v1` (OpenClaw)
+
+### 探索实验室（Web）
+
+从「成长 → 探索实验室」或「更多功能」进入 `/explore`，按学科或关键词查找精选交互学习资源。每条提供中文导读、探索任务、一道即时自测及解析，并标注来源、语言、收录日期。外部演示在新窗口打开；这是人工维护的资源精选，不是自动更新的新闻流。
+
+首批主题为氧气之旅、二次函数、电路和化学方程式配平。内容维护在 `frontend/src/content/explorations.ts`，新增条目时需核对原始资源、任务和答案，注明收录日期。自测答案仅保存在当前组件状态，不写入学习档案，不代表知识点掌握；离开页面或筛选移除卡片后会重置。此模块目前适用于 Web 和手机浏览器，独立 React Native 客户端尚未接入。

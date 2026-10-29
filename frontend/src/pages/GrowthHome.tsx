@@ -2,6 +2,12 @@ import { Link } from 'react-router-dom'
 
 const cards = [
   {
+    to: '/explore',
+    title: '探索实验室',
+    desc: '精选交互学习资源：先观察、再动手，最后检验自己是否理解。',
+    icon: '🔬',
+  },
+  {
     to: '/trends',
     title: '成绩趋势',
     desc: '看各科走势、总分变化和阶段表现。',

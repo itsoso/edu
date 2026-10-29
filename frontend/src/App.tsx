@@ -13,6 +13,7 @@ import Register from './pages/Register'
 
 // 其余页面按需加载 (Recharts / ReactMarkdown 等大依赖会被拆到独立 chunk)
 const Trends = lazy(() => import('./pages/Trends'))
+const Explore = lazy(() => import('./pages/Explore'))
 const GrowthHome = lazy(() => import('./pages/GrowthHome'))
 const MyHome = lazy(() => import('./pages/MyHome'))
 const Plan = lazy(() => import('./pages/Plan'))
@@ -35,6 +36,7 @@ const Assignments = lazy(() => import('./pages/Assignments'))
 
 const navItems = [
   { to: '/', label: '今日', icon: '🏠', end: true },
+  { to: '/explore', label: '探索实验室', icon: '🔬' },
   { to: '/growth', label: '成长', icon: '📈' },
   { to: '/me', label: '我的', icon: '🕊️' },
   { to: '/assignments', label: '任务', icon: '📋' },
@@ -253,6 +255,7 @@ function Shell() {
           <Suspense fallback={<PageLoading />}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
+            <Route path="/explore" element={<Explore />} />
             <Route path="/growth" element={<GrowthHome />} />
             <Route path="/me" element={<MyHome />} />
             <Route path="/trends" element={<Trends />} />
