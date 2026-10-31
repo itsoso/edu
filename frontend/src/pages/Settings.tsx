@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import signals from '../lib/signals'
+import SkillsAccess from '../components/SkillsAccess'
 
 type ProfileSettings = {
   signals_enabled: boolean
@@ -175,6 +176,8 @@ export default function Settings() {
           )}
         </div>
       </div>
+
+      <SkillsAccess />
 
       {/* 看见自己 入口 */}
       <Link
