@@ -56,8 +56,8 @@ def get_my_profile():
         "build_cost_usd": row["build_cost_usd"],
         "is_monthly_snapshot": bool(row["is_monthly_snapshot"]),
         "profile": profile,
-        "viewer_role": "self" if target == g.owner_id else "parent",
-        "can_edit": target == g.owner_id,
+        "viewer_role": "parent" if g.read_only else ("self" if target == g.owner_id else "parent"),
+        "can_edit": not g.read_only and target == g.owner_id,
     })
 
 

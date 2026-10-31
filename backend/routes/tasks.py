@@ -503,6 +503,9 @@ def get_daily_tip():
         if row:
             return jsonify(row_to_dict(row))
 
+        if g.read_only:
+            return jsonify({'exists': False, 'skipped': True, 'reason': 'read_only_account'})
+
         # 不存在 → 检查 LLM 是否可用
         if not get_llm().configured():
             return jsonify({"exists": False, "skipped": True, "reason": "llm_not_configured"})

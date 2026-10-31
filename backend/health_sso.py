@@ -33,7 +33,12 @@ def config():
     uid = int(os.environ.get('EDU_HEALTH_SSO_USER_ID', '0'))
     if not enabled() or len(secret) < 32 or not re.fullmatch(r'[1-9][0-9]*', subject) or uid <= 0:
         raise ValueError('invalid_sso_configuration')
-    return dict(secret=secret, subject=subject, user_id=uid,
+    viewers = json.loads(os.environ.get('EDU_HEALTH_SSO_VIEWERS', '{}'))
+    if (not isinstance(viewers, dict) or subject in viewers
+            or any(not re.fullmatch(r'[1-9][0-9]*', k) or type(v) is not int or v <= 0
+                   for k, v in viewers.items())):
+        raise ValueError('invalid_sso_configuration')
+    return dict(secret=secret, subject=subject, user_id=uid, viewers=viewers,
                 issuer=origin('EDU_HEALTH_SSO_ISSUER'), origin=origin('EDU_HEALTH_SSO_ORIGIN'))
 
 
@@ -55,7 +60,7 @@ def verify_ticket(ticket, cfg, *, native=False):
     now = int(time.time())
     if (type(claims['v']) is not int or claims['v'] != 1
             or claims['purpose'] != ('edu-native-login' if native else 'edu-browser-login') or claims['iss'] != cfg['issuer']
-            or claims['aud'] != cfg['origin'] or claims['sub'] != cfg['subject']
+            or claims['aud'] != cfg['origin'] or (not isinstance(claims['sub'], str) or claims['sub'] not in {cfg['subject'], *cfg['viewers']})
             or not isinstance(claims['state'], str) or not STATE_RE.fullmatch(claims['state'])
             or type(claims['iat']) is not int or type(claims['exp']) is not int
             or not now - 60 <= claims['iat'] <= now
@@ -66,7 +71,7 @@ def verify_ticket(ticket, cfg, *, native=False):
 
 def session_user(session):
     try:
-        cfg = config()
+        cfg = identity_config(config(), session.get('health_subject'))
     except ValueError:
         return None
     expires = session.get('health_expires_at')
@@ -106,8 +111,12 @@ def native_identity(username, password):
             if not isinstance(login, dict) or not isinstance(login.get('user'), dict):
                 raise ValueError('invalid_upstream')
             identity = login['user'].get('id')
-            if type(identity) is not int or str(identity) != cfg['subject']:
+            if type(identity) is not int:
                 raise NativeLoginError(403, 'health_account_not_linked')
+            try:
+                cfg = identity_config(cfg, str(identity))
+            except ValueError:
+                raise NativeLoginError(403, 'health_account_not_linked') from None
             token = login.get('access_token')
             if not isinstance(token, str) or not token or len(token) > 16384:
                 raise ValueError('invalid_upstream')
@@ -119,7 +128,7 @@ def native_identity(username, password):
             if not isinstance(proof, dict):
                 raise ValueError('invalid_upstream')
             claims = verify_ticket(proof.get('ticket'), cfg, native=True)
-            if claims['state'] != state:
+            if claims['state'] != state or claims['sub'] != str(identity):
                 raise ValueError('invalid_upstream')
             return cfg
     except (httpx.HTTPError, ValueError, UnicodeError):
@@ -132,3 +141,20 @@ def _check_upstream(response):
         raise NativeLoginError(response.status_code, code)
     if response.status_code != 200 or len(response.content) > 65536:
         raise NativeLoginError(503, 'health_login_unavailable')
+
+
+def identity_config(cfg, subject):
+    """Resolve an explicit identity; extra identities must be parents of the owner."""
+    if subject == cfg['subject']:
+        return cfg
+    if not isinstance(subject, str) or subject not in cfg['viewers']:
+        raise ValueError('health_account_not_linked')
+    from db import db
+    uid = cfg['viewers'][subject]
+    with db() as conn:
+        row = conn.execute('SELECT role, student_id FROM users WHERE id=?', (uid,)).fetchone()
+        owner = conn.execute('SELECT role FROM users WHERE id=?', (cfg['user_id'],)).fetchone()
+    if (not row or row['role'] != 'parent' or row['student_id'] != cfg['user_id']
+            or not owner or owner['role'] != 'student'):
+        raise ValueError('health_account_not_linked')
+    return {**cfg, 'subject': subject, 'user_id': uid}

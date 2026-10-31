@@ -61,6 +61,7 @@ def callback():
         return jsonify(error='invalid_health_login'), 400
     try:
         claims = sso.verify_ticket(request.form['ticket'], cfg)
+        cfg = sso.identity_config(cfg, claims['sub'])
     except (ValueError, UnicodeError):
         return jsonify(error='invalid_health_login'), 400
     now = int(time.time())

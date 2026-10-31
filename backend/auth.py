@@ -166,6 +166,19 @@ def public_user(user: dict) -> dict:
     }
 
 
+# Explicit read surface: new endpoints require review before viewers can access them.
+VIEWER_READ_ENDPOINTS = frozenset({
+    'exams.list_exams', 'exams.latest_exam_insight', 'exams.scores_trend',
+    'tasks.list_tasks', 'tasks.list_checkins', 'tasks.checkins_stats',
+    'tasks.dashboard_summary', 'tasks.get_daily_tip',
+    'mistakes.list_mistakes', 'mistakes.mistakes_stats', 'mistakes.knowledge_graph',
+    'schedule.list_courses', 'schedule.list_children',
+    'uploads.list_uploads', 'uploads.get_upload', 'uploads.get_upload_file',
+    'uploads.get_upload_preview', 'reports.list_monthly_reports', 'reports.get_monthly_report',
+    'assignments.list_assignments', 'profile.get_my_profile',
+    'profile.get_my_profile_history', 'profile.get_profile_version',
+})
+
 # ---------- 装饰器 ----------
 def login_required(fn):
     @wraps(fn)
@@ -177,6 +190,12 @@ def login_required(fn):
             if not user:
                 session.clear()
                 return jsonify({"error": "unauthorized"}), 401
+            import health_sso
+            g.read_only = (health_sso.enabled()
+                           and user['id'] in health_sso.config()['viewers'].values())
+            if g.read_only and (request.method not in {'GET', 'HEAD'}
+                                or request.endpoint not in VIEWER_READ_ENDPOINTS):
+                return jsonify(error='read_only_account'), 403
             g.current_user = user
             g.owner_id = get_owner_student_id(user)
         return fn(*args, **kwargs)
@@ -204,6 +223,9 @@ def verify_health_token(token):
     try:
         cfg = health_sso.config()
         data = _get_serializer().loads(token, max_age=8 * 3600)
+        if not isinstance(data, dict):
+            return None
+        cfg = health_sso.identity_config(cfg, data.get('health_subject'))
         if (isinstance(data, dict) and type(data.get('uid')) is int
                 and data.get('uid') == cfg['user_id'] and data.get('provider') == 'health'
                 and data.get('health_subject') == cfg['subject'] and data.get('health_issuer') == cfg['issuer']):
